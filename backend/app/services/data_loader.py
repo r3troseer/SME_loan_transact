@@ -113,7 +113,7 @@ def run_analysis_pipeline(df: pd.DataFrame, lenders: list) -> pd.DataFrame:
     df = inclusion_scanner.analyze(df)
 
     print("Running Lender Matching...")
-    matcher = Matcher(lenders)
+    matcher = Matcher()
     df = matcher.analyze(df)
 
     print("Running Pricing Analysis...")
@@ -282,7 +282,8 @@ def run_migration(excel_path: str = None):
 
     # Get lenders
     if AGENTS_AVAILABLE:
-        lenders_data = LENDERS
+        # LENDERS is a dict, convert to list of values
+        lenders_data = list(LENDERS.values())
     else:
         lenders_data = [
             {
