@@ -259,15 +259,25 @@ def run_migration(excel_path: str = None):
     # Initialize database tables
     init_db()
 
-    # Default path - go up from backend/app/services to project root
+    # Default path - try multiple locations
     if excel_path is None:
-        # Get the project root (gfa-loan-sandbox)
-        project_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..")
-        )
-        excel_path = os.path.join(
-            project_root, "data", "UKFIN Hackathon_sample_file_data_GFA Exchange.xlsx"
-        )
+        # Try Docker path first (/app/data/), then local dev path
+        possible_paths = [
+            # Docker: /app/app/services -> /app/data
+            os.path.join(os.path.dirname(__file__), "..", "..", "data", "UKFIN Hackathon_sample_file_data_GFA Exchange.xlsx"),
+            # Local dev: backend/app/services -> data (project root)
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "UKFIN Hackathon_sample_file_data_GFA Exchange.xlsx"),
+        ]
+
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                excel_path = abs_path
+                break
+
+        if excel_path is None:
+            excel_path = possible_paths[0]  # Default to first path for error message
+
         print(f"Looking for Excel file at: {excel_path}")
 
     # Get lenders
