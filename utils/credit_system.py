@@ -20,18 +20,38 @@ class CreditManager:
 
     # Credit costs for different actions
     COSTS = {
+        # Loan Sale/Buy actions
         'view_details': 1,
         'generate_explanation': 2,
         'express_interest': 5,
-        'reveal_counterparty': 10
+        'submit_bid': 3,
+        'view_bids': 3,
+        'reveal_counterparty': 5,
+        # Loan Swap actions
+        'view_swap_details': 1,
+        'accept_swap': 3,
+        'browse_unlisted_loans': 2,
+        'propose_swap': 5,
+        'view_swap_proposal': 1,
+        'generate_swap_story': 2,
     }
 
     # Action descriptions for display
     ACTION_LABELS = {
+        # Loan Sale/Buy actions
         'view_details': 'View Recommendation Details',
         'generate_explanation': 'Generate AI Explanation',
         'express_interest': 'Express Transaction Interest',
-        'reveal_counterparty': 'Reveal Counterparty Identity'
+        'submit_bid': 'Submit Bid on Loan',
+        'view_bids': 'View Incoming Bids',
+        'reveal_counterparty': 'Reveal Counterparty Identity',
+        # Loan Swap actions
+        'view_swap_details': 'View Swap Details',
+        'accept_swap': 'Accept Swap Proposal',
+        'browse_unlisted_loans': 'Browse Unlisted Loans',
+        'propose_swap': 'Propose Loan Swap',
+        'view_swap_proposal': 'View Incoming Swap Proposal',
+        'generate_swap_story': 'Generate Swap Inclusion Story',
     }
 
     def __init__(self, initial_credits: int = 100):

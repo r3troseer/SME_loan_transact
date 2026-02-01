@@ -16,6 +16,7 @@ from agents.inclusion_scanner import InclusionScanner
 from agents.matcher import Matcher
 from agents.pricer import Pricer
 from agents.explainer import Explainer, prepare_explanation_data
+from agents.swap_matcher import SwapMatcher, get_swap_statistics
 from lenders.profiles import LENDERS, get_lender_for_display
 from utils.anonymizer import (
     anonymize_lender, group_region, round_score, band_turnover,
@@ -84,6 +85,57 @@ def get_credit_manager():
     return st.session_state.credit_manager
 
 
+def init_matching_state():
+    """Initialize session state for double-blind matching system."""
+    if 'bids' not in st.session_state:
+        # {loan_id: [{buyer_id, discount_range, timestamp}]}
+        st.session_state.bids = {}
+    if 'interests' not in st.session_state:
+        # {loan_id: [buyer_ids]}
+        st.session_state.interests = {}
+    if 'reveals' not in st.session_state:
+        # {loan_id: {seller_revealed: bool, buyer_revealed: bool, buyer_id: str}}
+        st.session_state.reveals = {}
+    if 'listed_for_sale' not in st.session_state:
+        # Set of loan_ids that sellers have listed
+        st.session_state.listed_for_sale = set()
+
+
+def init_swap_state():
+    """Initialize session state for loan swap system."""
+    # Auto-generated swap suggestions (cached)
+    if 'auto_swap_suggestions' not in st.session_state:
+        st.session_state.auto_swap_suggestions = []
+
+    # Manual swap proposals
+    # {proposal_id: {proposer_lender, proposer_loan_id, target_lender,
+    #                target_loan_id, status, message, created_at}}
+    if 'swap_proposals' not in st.session_state:
+        st.session_state.swap_proposals = {}
+
+    # Proposal counter for unique IDs
+    if 'swap_proposal_counter' not in st.session_state:
+        st.session_state.swap_proposal_counter = 0
+
+    # Manual proposal wizard state
+    if 'manual_proposal_draft' not in st.session_state:
+        st.session_state.manual_proposal_draft = {
+            'step': 1,
+            'my_loan_id': None,
+            'target_lender': None,
+            'their_loan_id': None,
+            'message': ''
+        }
+
+    # Accepted swaps (for demo tracking)
+    if 'accepted_swaps' not in st.session_state:
+        st.session_state.accepted_swaps = set()  # Set of swap identifiers
+
+    # Generated inclusion stories (cached for display)
+    if 'generated_stories' not in st.session_state:
+        st.session_state.generated_stories = {}
+
+
 def render_sidebar():
     """Render the sidebar with navigation and credit balance."""
     st.sidebar.markdown("## 🏦 GFA Exchange")
@@ -124,7 +176,8 @@ def render_sidebar():
         [
             "📊 Portfolio Overview",
             "🏢 Company Analysis",
-            "🔄 Swap Recommendations",
+            "💵 Loan Sales",
+            "🔄 Loan Swaps",
             "🏛️ Lender View",
             "📈 Market Insights",
             "💰 Transaction Simulator"
@@ -142,12 +195,24 @@ def render_sidebar():
     # Credit pricing info
     with st.sidebar.expander("💰 Credit Costs"):
         st.markdown("""
+        **Loan Sales:**
         | Action | Cost |
         |--------|------|
         | View Details | 1 credit |
         | AI Explanation | 2 credits |
+        | Submit Bid | 3 credits |
+        | View Bids | 3 credits |
         | Express Interest | 5 credits |
-        | Reveal Identity | 10 credits |
+        | Reveal Identity | 5 credits |
+
+        **Loan Swaps:**
+        | Action | Cost |
+        |--------|------|
+        | View Swap Details | 1 credit |
+        | Accept Swap | 3 credits |
+        | Browse Unlisted | 2 credits |
+        | Propose Swap | 5 credits |
+        | Swap Inclusion Story | 2 credits |
         """)
 
     return page
@@ -351,10 +416,17 @@ def render_company_analysis(df):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_swap_recommendations(df):
-    """Render the Swap Recommendations page."""
-    st.markdown('<p class="main-header">Swap Recommendations</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Loans that would benefit from reallocation</p>', unsafe_allow_html=True)
+def render_loan_sales(df):
+    """Render the Loan Sales page with double-blind matching."""
+    st.markdown('<p class="main-header">Loan Sales</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Buy and sell loans in a double-blind marketplace</p>', unsafe_allow_html=True)
+
+    # Initialize matching state
+    init_matching_state()
+    init_swap_state()
+
+    # Store DataFrame in session state for swap proposals
+    st.session_state.current_df = df
 
     # Reset lender mapping for consistent anonymization
     if ANONYMIZE:
@@ -363,174 +435,891 @@ def render_swap_recommendations(df):
     # Get credit manager
     cm = get_credit_manager()
 
-    # Perspective selector (Seller vs Buyer view)
-    st.markdown("### 🎯 View Perspective")
-    perspective = st.radio(
-        "How do you want to view recommendations?",
-        ["📋 Market Overview", "📤 Seller View (Loans to Exit)", "📥 Buyer View (Loans to Acquire)"],
-        horizontal=True,
-        help="Market Overview shows all mismatched loans. Seller View shows loans you should sell. Buyer View shows loans you could acquire."
+    # Lender selector (simulates login)
+    st.markdown("### 🏦 Select Your Lender")
+    lender_list = list(df['Current_Lender'].unique())
+    selected_lender = st.selectbox(
+        "This simulates being logged in as a lender",
+        lender_list,
+        help="In production, this would be determined by your login credentials"
     )
 
-    # Filter options
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        status_filter = st.selectbox("Filter by Status", ["All Candidates", "Strong Only", "Moderate Only"])
-    with col2:
-        sector_filter = st.selectbox("Filter by Sector", ["All"] + list(df['Sector'].unique()))
-    with col3:
-        # Lender selector - only show if not Market Overview
-        if perspective != "📋 Market Overview":
-            lender_list = list(df['Current_Lender'].unique())
-            selected_lender = st.selectbox("Select Your Lender", lender_list)
-        else:
-            selected_lender = None
-
-    # Apply filters
-    filtered_df = df[df['Is_Mismatch'] == True].copy()
-
-    if status_filter == "Strong Only":
-        filtered_df = filtered_df[filtered_df['Reallocation_Status'] == 'STRONG REALLOCATION CANDIDATE']
-    elif status_filter == "Moderate Only":
-        filtered_df = filtered_df[filtered_df['Reallocation_Status'] == 'MODERATE REALLOCATION CANDIDATE']
-
-    if sector_filter != "All":
-        filtered_df = filtered_df[filtered_df['Sector'] == sector_filter]
-
-    # Apply perspective-based lender filtering
-    if perspective == "📤 Seller View (Loans to Exit)" and selected_lender:
-        # Show loans this lender currently holds that are mismatched
-        filtered_df = filtered_df[filtered_df['Current_Lender'] == selected_lender]
-        st.info(f"📤 **Seller View:** Showing {len(filtered_df)} mismatched loans that {selected_lender} could sell or swap to better-suited lenders.")
-
-    elif perspective == "📥 Buyer View (Loans to Acquire)" and selected_lender:
-        # Show loans from OTHER lenders where this lender is the best match
-        filtered_df = filtered_df[
-            (filtered_df['Best_Match_Lender'] == selected_lender) &
-            (filtered_df['Current_Lender'] != selected_lender)
-        ]
-        st.info(f"📥 **Buyer View:** Showing {len(filtered_df)} acquisition opportunities - loans from other lenders that would be a good fit for {selected_lender}.")
-
-    # Sort by fit gap
-    filtered_df = filtered_df.sort_values('Fit_Gap', ascending=False)
-
-    st.markdown(f"**{len(filtered_df)} recommendations found**")
     st.markdown("---")
 
-    # Display recommendations
-    for idx, row in filtered_df.head(10).iterrows():
-        fit_gap_display = round_score(row['Fit_Gap']) if ANONYMIZE else row['Fit_Gap']
-        sme_id = row['SME_ID']
+    # Two tabs: Seller and Buyer perspectives
+    seller_tab, buyer_tab = st.tabs(["📤 Loans to Sell", "📥 Opportunities to Buy"])
 
-        # Check if user has already paid to view this item
-        already_viewed = cm.has_viewed_item('view_details', sme_id)
+    with seller_tab:
+        render_seller_view(df, selected_lender, cm)
 
-        with st.expander(f"🔄 {sme_id} | {row['Sector']} | Fit Improvement: +{fit_gap_display}"):
-            # Show basic info always (free)
-            st.markdown(f"**Sector:** {row['Sector']} | **Region:** {group_region(row['Region']) if ANONYMIZE else row['Region']}")
+    with buyer_tab:
+        render_buyer_view(df, selected_lender, cm)
 
-            # Gate detailed view behind credits
-            if already_viewed or not ANONYMIZE:
-                show_details = True
+
+def render_seller_view(df, my_lender, cm):
+    """Show loans I hold that are mismatched - seller's perspective."""
+    st.markdown("### Your Mismatched Loans")
+    st.markdown("These loans in your portfolio don't fit your strategy. Consider selling or swapping them.")
+
+    # Get my mismatched loans
+    my_mismatched = df[
+        (df['Current_Lender'] == my_lender) &
+        (df['Is_Mismatch'] == True)
+    ].sort_values('Fit_Gap', ascending=False)
+
+    if len(my_mismatched) == 0:
+        st.success("All your loans are well-matched to your portfolio strategy.")
+        return
+
+    st.info(f"📤 Found **{len(my_mismatched)}** loans that may not fit your strategy")
+
+    # Filter options
+    col1, col2 = st.columns(2)
+    with col1:
+        status_filter = st.selectbox("Filter by Status", ["All", "Strong Candidates", "Moderate Candidates"], key="seller_status")
+    with col2:
+        sector_filter = st.selectbox("Filter by Sector", ["All"] + list(my_mismatched['Sector'].unique()), key="seller_sector")
+
+    # Apply filters
+    filtered = my_mismatched.copy()
+    if status_filter == "Strong Candidates":
+        filtered = filtered[filtered['Reallocation_Status'] == 'STRONG REALLOCATION CANDIDATE']
+    elif status_filter == "Moderate Candidates":
+        filtered = filtered[filtered['Reallocation_Status'] == 'MODERATE REALLOCATION CANDIDATE']
+    if sector_filter != "All":
+        filtered = filtered[filtered['Sector'] == sector_filter]
+
+    # Display seller cards
+    for idx, row in filtered.head(10).iterrows():
+        render_seller_card(row, my_lender, cm)
+
+
+def render_seller_card(loan, my_lender, cm):
+    """Render a card for seller view - my loan to potentially sell."""
+    sme_id = loan['SME_ID']
+
+    # Get market interest for this loan from session state
+    interest_count = len(st.session_state.interests.get(sme_id, []))
+    bids = st.session_state.bids.get(sme_id, [])
+    is_listed = sme_id in st.session_state.listed_for_sale
+
+    # Display values
+    if ANONYMIZE:
+        my_fit = round_score(loan['Current_Lender_Fit'])
+        best_fit = round_score(loan['Best_Match_Fit'])
+        outstanding = band_loan_amount(loan['Outstanding_Balance'])
+        region = group_region(loan['Region'])
+    else:
+        my_fit = f"{loan['Current_Lender_Fit']:.0f}"
+        best_fit = f"{loan['Best_Match_Fit']:.0f}"
+        outstanding = f"£{loan['Outstanding_Balance']:,.0f}"
+        region = loan['Region']
+
+    # Card header with fit score indicator
+    fit_indicator = "🔴" if loan['Current_Lender_Fit'] < 40 else "🟡" if loan['Current_Lender_Fit'] < 60 else "🟢"
+    expander_title = f"{fit_indicator} {sme_id} | {loan['Sector']} | Your Fit: {my_fit}/100"
+
+    with st.expander(expander_title, expanded=False):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**YOUR POSITION**")
+            st.markdown(f"**Lender:** {my_lender} (You)")
+            st.markdown(f"**Fit Score:** {my_fit}/100")
+            st.markdown(f"**Sector:** {loan['Sector']}")
+            st.markdown(f"**Region:** {region}")
+            st.markdown(f"**Outstanding:** {outstanding}")
+            st.markdown(f"**Remaining Term:** {loan['Years_Remaining']} years")
+
+        with col2:
+            st.markdown("**MARKET INTEREST**")
+            if is_listed:
+                st.markdown(f"**Status:** 🟢 Listed for Sale")
+                st.markdown(f"**Buyers interested:** {interest_count}")
+                if bids:
+                    avg_discount = sum(b['discount'] for b in bids) / len(bids)
+                    discount_display = f"{band_percentage(avg_discount)}%" if ANONYMIZE else f"{avg_discount:.1f}%"
+                    st.markdown(f"**Bid range:** ~{discount_display} discount")
+                else:
+                    st.markdown("**Bids:** No bids yet")
+                st.markdown(f"**Best buyer fit:** {best_fit}/100")
             else:
-                cost = cm.get_cost('view_details')
-                if cm.can_afford('view_details'):
-                    if st.button(f"🔓 View Details ({cost} credit)", key=f"view_{sme_id}"):
-                        cm.spend('view_details', sme_id)
+                st.markdown("**Status:** ⚪ Not listed")
+                st.markdown("*List for sale to see market interest*")
+
+        st.markdown("---")
+
+        # Actions
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if not is_listed:
+                if st.button("📋 List for Sale", key=f"list_{sme_id}"):
+                    st.session_state.listed_for_sale.add(sme_id)
+                    st.success("Listed! Potential buyers will be notified.")
+                    st.rerun()
+            else:
+                st.markdown("✅ **Listed**")
+
+        with col2:
+            # View bids - costs credits
+            if is_listed and bids:
+                has_viewed_bids = cm.has_viewed_item('view_bids', sme_id)
+                if has_viewed_bids:
+                    st.markdown("**Bid Details:**")
+                    for i, bid in enumerate(bids):
+                        discount_display = f"{band_percentage(bid['discount'])}%" if ANONYMIZE else f"{bid['discount']:.1f}%"
+                        st.markdown(f"- Buyer {i+1}: {discount_display} discount")
+                else:
+                    cost = cm.get_cost('view_bids')
+                    if cm.can_afford('view_bids'):
+                        if st.button(f"👁 View Bids ({cost} credits)", key=f"viewbids_{sme_id}"):
+                            cm.spend('view_bids', sme_id)
+                            st.rerun()
+                    else:
+                        st.caption(f"Need {cost} credits to view bids")
+
+        with col3:
+            # Reveal counterparty (if mutual interest)
+            if is_listed and interest_count > 0:
+                reveal_info = st.session_state.reveals.get(sme_id, {})
+                if reveal_info.get('seller_revealed') and reveal_info.get('buyer_revealed'):
+                    buyer_id = reveal_info.get('buyer_id', 'Unknown')
+                    st.success(f"🔓 Matched with: {buyer_id}")
+                else:
+                    cost = cm.get_cost('reveal_counterparty')
+                    if cm.can_afford('reveal_counterparty'):
+                        if st.button(f"🔓 Accept Reveal ({cost} credits)", key=f"reveal_seller_{sme_id}"):
+                            cm.spend('reveal_counterparty', sme_id)
+                            if sme_id not in st.session_state.reveals:
+                                st.session_state.reveals[sme_id] = {}
+                            st.session_state.reveals[sme_id]['seller_revealed'] = True
+                            st.info("Waiting for buyer to also accept reveal...")
+                            st.rerun()
+                    else:
+                        st.caption(f"Need {cost} credits to reveal")
+
+
+def render_buyer_view(df, my_lender, cm):
+    """Show loans from others that fit me - buyer's perspective."""
+    st.markdown("### Acquisition Opportunities")
+    st.markdown("Loans from other lenders that would be a good fit for your portfolio.")
+
+    # Get opportunities: loans where I'm the best match but not the current holder
+    opportunities = df[
+        (df['Best_Match_Lender'] == my_lender) &
+        (df['Current_Lender'] != my_lender) &
+        (df['Is_Mismatch'] == True)
+    ].sort_values('Fit_Gap', ascending=False)
+
+    if len(opportunities) == 0:
+        st.info("No acquisition opportunities match your portfolio strategy at this time.")
+        return
+
+    st.info(f"📥 Found **{len(opportunities)}** loans that would fit your portfolio")
+
+    # Filter options
+    col1, col2 = st.columns(2)
+    with col1:
+        status_filter = st.selectbox("Filter by Status", ["All", "Strong Candidates", "Moderate Candidates"], key="buyer_status")
+    with col2:
+        sector_filter = st.selectbox("Filter by Sector", ["All"] + list(opportunities['Sector'].unique()), key="buyer_sector")
+
+    # Apply filters
+    filtered = opportunities.copy()
+    if status_filter == "Strong Candidates":
+        filtered = filtered[filtered['Reallocation_Status'] == 'STRONG REALLOCATION CANDIDATE']
+    elif status_filter == "Moderate Candidates":
+        filtered = filtered[filtered['Reallocation_Status'] == 'MODERATE REALLOCATION CANDIDATE']
+    if sector_filter != "All":
+        filtered = filtered[filtered['Sector'] == sector_filter]
+
+    # Display buyer cards
+    for idx, row in filtered.head(10).iterrows():
+        render_buyer_card(row, my_lender, cm)
+
+
+def render_buyer_card(loan, my_lender, cm):
+    """Render a card for buyer view - opportunity to acquire."""
+    sme_id = loan['SME_ID']
+
+    # Check states
+    is_listed = sme_id in st.session_state.listed_for_sale
+    my_interests = st.session_state.interests.get(sme_id, [])
+    has_expressed_interest = my_lender in my_interests
+    my_bids = [b for b in st.session_state.bids.get(sme_id, []) if b.get('buyer_id') == my_lender]
+    has_bid = len(my_bids) > 0
+
+    # Display values (seller identity COMPLETELY hidden)
+    if ANONYMIZE:
+        my_fit = round_score(loan['Best_Match_Fit'])
+        outstanding = band_loan_amount(loan['Outstanding_Balance'])
+        suggested_price = band_loan_amount(loan['Suggested_Price'])
+        discount = f"{band_percentage(loan['Discount_Percent'])}%"
+        roi = f"{band_percentage(loan['Annualized_ROI'])}%"
+        region = group_region(loan['Region'])
+    else:
+        my_fit = f"{loan['Best_Match_Fit']:.0f}"
+        outstanding = f"£{loan['Outstanding_Balance']:,.0f}"
+        suggested_price = f"£{loan['Suggested_Price']:,.0f}"
+        discount = f"{loan['Discount_Percent']:.1f}%"
+        roi = f"{loan['Annualized_ROI']:.1f}%"
+        region = loan['Region']
+
+    # Card header with your fit score
+    fit_indicator = "🟢" if loan['Best_Match_Fit'] >= 70 else "🟡" if loan['Best_Match_Fit'] >= 50 else "🔴"
+    expander_title = f"{fit_indicator} {sme_id} | {loan['Sector']} | Your Fit: {my_fit}/100"
+
+    with st.expander(expander_title, expanded=False):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**CURRENT HOLDER**")
+            # Check if identity has been revealed
+            reveal_info = st.session_state.reveals.get(sme_id, {})
+            if reveal_info.get('seller_revealed') and reveal_info.get('buyer_revealed'):
+                st.markdown(f"**Lender:** {loan['Current_Lender']}")
+                st.success("🔓 Identity revealed!")
+            else:
+                st.markdown("🔒 *[Hidden until mutual consent]*")
+                st.caption("Express interest to initiate matching")
+
+            st.markdown(f"**Outstanding:** {outstanding}")
+            st.markdown(f"**Remaining Term:** {loan['Years_Remaining']} years")
+
+        with col2:
+            st.markdown("**YOUR FIT**")
+            st.markdown(f"**Fit Score:** {my_fit}/100")
+            st.markdown(f"**Sector:** {loan['Sector']}")
+            st.markdown(f"**Region:** {region}")
+
+            # Show why it fits (from Best_Match_Reasons)
+            reasons = loan.get('Best_Match_Reasons', {})
+            if reasons and reasons.get('positive'):
+                st.markdown("**Why it fits you:**")
+                for r in reasons['positive'][:2]:
+                    st.markdown(f"✓ {r}")
+
+        # Pricing info (if details viewed)
+        has_viewed_details = cm.has_viewed_item('view_details', sme_id)
+
+        if has_viewed_details:
+            st.markdown("---")
+            st.markdown("**INDICATIVE PRICING**")
+            pcol1, pcol2, pcol3 = st.columns(3)
+            with pcol1:
+                st.markdown(f"**Suggested Price:** {suggested_price}")
+            with pcol2:
+                st.markdown(f"**Discount:** {discount}")
+            with pcol3:
+                st.markdown(f"**Your ROI:** {roi}")
+        else:
+            st.markdown("---")
+            cost = cm.get_cost('view_details')
+            if cm.can_afford('view_details'):
+                if st.button(f"🔓 View Pricing Details ({cost} credit)", key=f"viewdetails_{sme_id}"):
+                    cm.spend('view_details', sme_id)
+                    st.rerun()
+            else:
+                st.caption(f"Need {cost} credit to view pricing details")
+
+        st.markdown("---")
+
+        # Actions
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            # Express interest
+            if has_expressed_interest:
+                st.markdown("✅ **Interest Expressed**")
+            else:
+                cost = cm.get_cost('express_interest')
+                if cm.can_afford('express_interest'):
+                    if st.button(f"🤝 Express Interest ({cost} credits)", key=f"interest_{sme_id}"):
+                        cm.spend('express_interest', sme_id)
+                        if sme_id not in st.session_state.interests:
+                            st.session_state.interests[sme_id] = []
+                        st.session_state.interests[sme_id].append(my_lender)
+                        st.success("Interest expressed! Seller will be notified.")
                         st.rerun()
-                    show_details = False
                 else:
-                    st.warning(f"⚠️ Insufficient credits. Need {cost} credit to view details.")
-                    show_details = False
+                    st.caption(f"Need {cost} credits")
 
-            if show_details or already_viewed:
-                col1, col2, col3 = st.columns(3)
-
-                # Apply anonymization
-                if ANONYMIZE:
-                    current_fit_display = round_score(row['Current_Lender_Fit'])
-                    best_fit_display = round_score(row['Best_Match_Fit'])
-                    best_lender_display = anonymize_lender(row['Best_Match_Lender'], is_current=False)
-                    outstanding_display = band_loan_amount(row['Outstanding_Balance'])
-                    price_display = band_loan_amount(row['Suggested_Price'])
-                    discount_display = f"{band_percentage(row['Discount_Percent'])}%"
-                    roi_display = f"{band_percentage(row['Annualized_ROI'])}%"
+        with col2:
+            # Submit bid
+            if has_expressed_interest:
+                if has_bid:
+                    bid_discount = my_bids[0]['discount']
+                    discount_display = f"{band_percentage(bid_discount)}%" if ANONYMIZE else f"{bid_discount:.1f}%"
+                    st.markdown(f"💰 **Bid: {discount_display}**")
                 else:
-                    current_fit_display = f"{row['Current_Lender_Fit']:.0f}"
-                    best_fit_display = f"{row['Best_Match_Fit']:.0f}"
-                    best_lender_display = row['Best_Match_Lender']
-                    outstanding_display = f"£{row['Outstanding_Balance']:,.0f}"
-                    price_display = f"£{row['Suggested_Price']:,.0f}"
-                    discount_display = f"{row['Discount_Percent']:.1f}%"
-                    roi_display = f"{row['Annualized_ROI']:.1f}%"
+                    cost = cm.get_cost('submit_bid')
+                    if cm.can_afford('submit_bid'):
+                        # Simple bid input
+                        bid_discount = st.slider(
+                            "Discount %",
+                            min_value=5,
+                            max_value=30,
+                            value=15,
+                            step=5,
+                            key=f"bid_slider_{sme_id}"
+                        )
+                        if st.button(f"💰 Submit Bid ({cost} credits)", key=f"submitbid_{sme_id}"):
+                            cm.spend('submit_bid', sme_id)
+                            if sme_id not in st.session_state.bids:
+                                st.session_state.bids[sme_id] = []
+                            st.session_state.bids[sme_id].append({
+                                'buyer_id': my_lender,
+                                'discount': bid_discount,
+                                'timestamp': pd.Timestamp.now()
+                            })
+                            st.success(f"Bid submitted at {bid_discount}% discount!")
+                            st.rerun()
+                    else:
+                        st.caption(f"Need {cost} credits to bid")
 
-                with col1:
-                    st.markdown("**Current Situation**")
-                    st.markdown(f"Lender: {row['Current_Lender']}")  # Current lender visible
-                    st.markdown(f"Fit Score: {current_fit_display}/100")
+        with col3:
+            # Reveal counterparty
+            if has_expressed_interest:
+                reveal_info = st.session_state.reveals.get(sme_id, {})
+                if reveal_info.get('seller_revealed') and reveal_info.get('buyer_revealed'):
+                    st.success("🔓 Matched!")
+                elif reveal_info.get('seller_revealed'):
+                    # Seller has revealed, buyer can now reveal
+                    cost = cm.get_cost('reveal_counterparty')
+                    if cm.can_afford('reveal_counterparty'):
+                        if st.button(f"🔓 Accept Match ({cost} credits)", key=f"reveal_buyer_{sme_id}"):
+                            cm.spend('reveal_counterparty', sme_id)
+                            st.session_state.reveals[sme_id]['buyer_revealed'] = True
+                            st.session_state.reveals[sme_id]['buyer_id'] = my_lender
+                            st.success(f"Match confirmed! Seller: {loan['Current_Lender']}")
+                            st.rerun()
+                    else:
+                        st.caption(f"Need {cost} credits")
+                else:
+                    st.caption("Waiting for seller response...")
 
-                with col2:
-                    st.markdown("**Recommended**")
-                    st.markdown(f"Lender: {best_lender_display}")  # Anonymized
-                    st.markdown(f"Fit Score: {best_fit_display}/100")
+        # AI Explanation (if details viewed)
+        if has_viewed_details:
+            st.markdown("---")
+            has_explanation = cm.has_viewed_item('generate_explanation', sme_id)
 
-                with col3:
-                    st.markdown("**Transaction**")
-                    st.markdown(f"Outstanding: {outstanding_display}")
-                    st.markdown(f"Suggested Price: {price_display}")
-                    st.markdown(f"Discount: {discount_display}")
-                    st.markdown(f"Buyer ROI: {roi_display}")
+            if has_explanation:
+                explainer = Explainer()
+                current_lender = LENDERS.get(loan['Current_Lender'], {})
+                recommended_lender = LENDERS.get(loan['Best_Match_Lender'], {})
 
-                # AI Explanation - gated behind additional credits
-                st.markdown("---")
-                explanation_key = f"explanation_{sme_id}"
-                has_explanation = cm.has_viewed_item('generate_explanation', sme_id)
+                pricing_details = {
+                    'loan_details': {'outstanding_balance': loan['Outstanding_Balance'], 'years_remaining': loan['Years_Remaining']},
+                    'pricing': {'suggested_price': loan['Suggested_Price'], 'discount_from_face': loan['Discount_Percent']},
+                    'buyer_metrics': {'annualized_roi': loan['Annualized_ROI']}
+                }
 
-                if has_explanation or not ANONYMIZE:
-                    # Generate explanation with anonymized data
-                    explainer = Explainer()
-                    current_lender = LENDERS.get(row['Current_Lender'], {})
-                    recommended_lender = LENDERS.get(row['Best_Match_Lender'], {})
+                company_data, curr_lender, rec_lender, scores, pricing = prepare_explanation_data(
+                    loan, current_lender, recommended_lender, pricing_details, anonymize=ANONYMIZE
+                )
 
-                    pricing_details = {
-                        'loan_details': {'outstanding_balance': row['Outstanding_Balance'], 'years_remaining': row['Years_Remaining']},
-                        'pricing': {'suggested_price': row['Suggested_Price'], 'discount_from_face': row['Discount_Percent']},
-                        'buyer_metrics': {'annualized_roi': row['Annualized_ROI']}
+                explanation = explainer.generate_explanation(
+                    company_data, curr_lender, rec_lender, scores, pricing
+                )
+                st.markdown("**🤖 AI Explanation:**")
+                st.info(explanation)
+            else:
+                cost = cm.get_cost('generate_explanation')
+                if cm.can_afford('generate_explanation'):
+                    if st.button(f"🤖 Generate AI Explanation ({cost} credits)", key=f"explain_{sme_id}"):
+                        cm.spend('generate_explanation', sme_id)
+                        st.rerun()
+                else:
+                    st.caption(f"Need {cost} credits for AI explanation")
+
+        # Propose Swap Instead section
+        st.markdown("---")
+        st.markdown("**🔄 OR: Propose a Swap Instead**")
+        st.caption("Offer one of your loans in exchange instead of paying cash")
+
+        # Get the current lender (buyer's) mismatched loans they could offer
+        if 'df_for_swap' not in st.session_state:
+            st.session_state.df_for_swap = None
+
+        with st.expander("🔄 Propose Swap Instead", expanded=False):
+            # Show the buyer's mismatched loans they could offer
+            st.markdown("**Select a loan from your portfolio to offer in exchange:**")
+
+            # We need access to the full DataFrame - pass it through session state
+            if hasattr(st.session_state, 'current_df'):
+                my_loans = st.session_state.current_df[
+                    (st.session_state.current_df['Current_Lender'] == my_lender) &
+                    (st.session_state.current_df['Is_Mismatch'] == True)
+                ]
+
+                if len(my_loans) == 0:
+                    st.info("You don't have any mismatched loans to offer in exchange.")
+                else:
+                    # Create options for loan selection
+                    loan_options = {}
+                    for _, my_loan in my_loans.iterrows():
+                        my_loan_id = my_loan['SME_ID']
+                        my_loan_fit = round_score(my_loan['Current_Lender_Fit']) if ANONYMIZE else f"{my_loan['Current_Lender_Fit']:.0f}"
+                        my_loan_band = band_loan_amount(my_loan['Outstanding_Balance']) if ANONYMIZE else f"£{my_loan['Outstanding_Balance']:,.0f}"
+                        option_text = f"{my_loan_id} | {my_loan['Sector']} | {my_loan_band} | Fit: {my_loan_fit}"
+                        loan_options[option_text] = my_loan_id
+
+                    selected_option = st.selectbox(
+                        "Your loan to offer:",
+                        list(loan_options.keys()),
+                        key=f"swap_offer_{sme_id}"
+                    )
+
+                    # Optional message
+                    swap_message = st.text_area(
+                        "Optional message (e.g., inclusion story):",
+                        placeholder="This swap would help an underserved company in Scotland access appropriate financing...",
+                        key=f"swap_message_{sme_id}",
+                        max_chars=200
+                    )
+
+                    # Submit swap proposal
+                    cost = cm.get_cost('propose_swap')
+                    if cm.can_afford('propose_swap'):
+                        if st.button(f"🔄 Send Swap Proposal ({cost} credits)", key=f"send_swap_{sme_id}"):
+                            cm.spend('propose_swap', sme_id)
+                            # Create the swap proposal
+                            proposal_id = st.session_state.swap_proposal_counter
+                            st.session_state.swap_proposal_counter += 1
+                            st.session_state.swap_proposals[proposal_id] = {
+                                'proposer_lender': my_lender,
+                                'proposer_loan_id': loan_options[selected_option],
+                                'target_lender': loan['Current_Lender'],
+                                'target_loan_id': sme_id,
+                                'status': 'pending',
+                                'message': swap_message,
+                                'created_at': pd.Timestamp.now()
+                            }
+                            st.success(f"Swap proposal sent! The seller will be notified.")
+                            st.rerun()
+                    else:
+                        st.caption(f"Need {cost} credits to propose swap")
+            else:
+                st.info("Loading loan data...")
+
+
+def render_loan_swaps(df):
+    """Render the Loan Swaps page with auto-swaps and manual proposals."""
+    st.markdown('<p class="main-header">Loan Swaps</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Exchange loans directly with other lenders - no cash required</p>', unsafe_allow_html=True)
+
+    # Initialize states
+    init_matching_state()
+    init_swap_state()
+
+    # Store DataFrame in session state
+    st.session_state.current_df = df
+
+    # Reset lender mapping for consistent anonymization
+    if ANONYMIZE:
+        reset_lender_mapping()
+
+    # Get credit manager
+    cm = get_credit_manager()
+
+    # Lender selector (simulates login)
+    st.markdown("### 🏦 Select Your Lender")
+    lender_list = list(df['Current_Lender'].unique())
+    selected_lender = st.selectbox(
+        "This simulates being logged in as a lender",
+        lender_list,
+        key="swap_lender_select",
+        help="In production, this would be determined by your login credentials"
+    )
+
+    st.markdown("---")
+
+    # Two tabs: Auto Swaps and Manual Proposals
+    auto_tab, manual_tab = st.tabs(["🤖 Auto Swaps", "💡 Manual Proposals"])
+
+    with auto_tab:
+        render_auto_swaps(df, selected_lender, cm)
+
+    with manual_tab:
+        render_manual_proposals(df, selected_lender, cm)
+
+
+def render_auto_swaps(df, my_lender, cm):
+    """Show system-generated complementary swap opportunities."""
+    st.markdown("### System-Suggested Swaps")
+    st.markdown("These are complementary mismatches where both parties benefit from exchanging loans.")
+
+    # Find complementary swaps
+    matcher = SwapMatcher()
+    all_swaps = matcher.find_complementary_swaps(df)
+
+    # Filter to swaps involving this lender
+    my_swaps = [s for s in all_swaps if s['lender_a'] == my_lender or s['lender_b'] == my_lender]
+
+    if len(my_swaps) == 0:
+        st.info("No complementary swap opportunities found for your portfolio at this time.")
+        st.markdown("Try the Manual Proposals tab to initiate your own swap requests.")
+        return
+
+    # Show statistics
+    stats = get_swap_statistics(my_swaps)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Available Swaps", stats['total_swaps'])
+    with col2:
+        st.metric("Inclusion Swaps", stats['inclusion_swaps'])
+    with col3:
+        st.metric("Avg Fit Improvement", f"+{stats['avg_fit_improvement']:.0f}")
+
+    st.markdown("---")
+
+    # Filter options
+    col1, col2 = st.columns(2)
+    with col1:
+        show_inclusion = st.checkbox("Show only inclusion swaps", value=False, key="filter_inclusion")
+    with col2:
+        sort_by = st.selectbox("Sort by", ["Swap Score", "Fit Improvement", "Inclusion Bonus"], key="sort_swaps")
+
+    # Apply filters and sorting
+    filtered_swaps = my_swaps
+    if show_inclusion:
+        filtered_swaps = [s for s in filtered_swaps if s['is_inclusion_swap']]
+
+    if sort_by == "Swap Score":
+        filtered_swaps = sorted(filtered_swaps, key=lambda x: x['swap_score'], reverse=True)
+    elif sort_by == "Fit Improvement":
+        filtered_swaps = sorted(filtered_swaps, key=lambda x: x['total_fit_improvement'], reverse=True)
+    else:
+        filtered_swaps = sorted(filtered_swaps, key=lambda x: x['inclusion_bonus'], reverse=True)
+
+    # Display swap cards
+    for swap in filtered_swaps[:10]:
+        render_auto_swap_card(swap, my_lender, cm)
+
+
+def render_auto_swap_card(swap, my_lender, cm):
+    """Render a card for an auto-suggested swap opportunity."""
+    # Get perspective-based summary
+    summary = SwapMatcher().get_swap_summary(swap, my_lender)
+
+    # Create swap identifier for tracking
+    swap_id = f"{swap['loan_a_id']}_{swap['loan_b_id']}"
+    is_accepted = swap_id in st.session_state.accepted_swaps
+
+    # Header with score
+    inclusion_badge = " 💚" if swap['is_inclusion_swap'] else ""
+    header = f"🔄 Combined Fit: +{swap['total_fit_improvement']} points{inclusion_badge}"
+
+    with st.expander(header, expanded=False):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**YOUR LOAN OUT:**")
+            you_give = summary['you_give']
+            if ANONYMIZE:
+                st.markdown(f"**Loan:** {you_give['loan_id']}")
+                st.markdown(f"**Sector:** {you_give['sector']}")
+                st.markdown(f"**Outstanding:** {you_give['outstanding_band']}")
+                st.markdown(f"**Your Fit:** {you_give['your_fit']}/100 (poor)")
+                st.markdown(f"**Their Fit:** {you_give['their_fit']}/100 (good for them)")
+            else:
+                st.markdown(f"**Loan:** {you_give['loan_id']}")
+                st.markdown(f"**Sector:** {you_give['sector']}")
+                st.markdown(f"**Your Fit:** {you_give['your_fit']}/100")
+
+        with col2:
+            st.markdown("**THEIR LOAN IN:**")
+            you_receive = summary['you_receive']
+            if ANONYMIZE:
+                st.markdown(f"**Loan:** {you_receive['loan_id']}")
+                st.markdown(f"**Sector:** {you_receive['sector']}")
+                st.markdown(f"**Outstanding:** {you_receive['outstanding_band']}")
+                st.markdown(f"**Your Fit:** {you_receive['your_fit']}/100 (excellent)")
+                st.markdown(f"**Their Fit:** {you_receive['their_fit']}/100 (poor for them)")
+            else:
+                st.markdown(f"**Loan:** {you_receive['loan_id']}")
+                st.markdown(f"**Sector:** {you_receive['sector']}")
+                st.markdown(f"**Your Fit:** {you_receive['your_fit']}/100")
+
+        # Why this works
+        st.markdown("---")
+        st.markdown("**WHY THIS WORKS:**")
+        st.markdown(f"✓ Your {you_give['sector']} loan fits their portfolio better")
+        st.markdown(f"✓ Their {you_receive['sector']} loan fits your portfolio better")
+        if swap['is_inclusion_swap']:
+            st.markdown("💚 This swap helps underserved companies access appropriate financing")
+
+        # Value adjustment notice
+        if summary['needs_cash_adjustment']:
+            st.warning(f"📊 Value difference detected - small cash adjustment may be needed")
+
+        # Actions
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            # View details
+            has_viewed = cm.has_viewed_item('view_swap_details', swap_id)
+            if not has_viewed:
+                cost = cm.get_cost('view_swap_details')
+                if cm.can_afford('view_swap_details'):
+                    if st.button(f"🔍 View Details ({cost} credit)", key=f"view_swap_{swap_id}"):
+                        cm.spend('view_swap_details', swap_id)
+                        st.rerun()
+                else:
+                    st.caption(f"Need {cost} credit")
+            else:
+                st.markdown("✅ Details viewed")
+
+        with col2:
+            # Accept swap
+            if is_accepted:
+                st.success("✅ Accepted!")
+            else:
+                cost = cm.get_cost('accept_swap')
+                if cm.can_afford('accept_swap'):
+                    if st.button(f"✅ Accept Swap ({cost} credits)", key=f"accept_{swap_id}"):
+                        cm.spend('accept_swap', swap_id)
+                        st.session_state.accepted_swaps.add(swap_id)
+                        st.success("Swap accepted! Counterparty will be notified.")
+                        st.rerun()
+                else:
+                    st.caption(f"Need {cost} credits")
+
+        with col3:
+            # Generate inclusion story
+            has_story = cm.has_viewed_item('generate_swap_story', swap_id)
+            if swap['is_inclusion_swap']:
+                if has_story:
+                    st.markdown("💚 Story generated")
+                else:
+                    cost = cm.get_cost('generate_swap_story')
+                    if cm.can_afford('generate_swap_story'):
+                        if st.button(f"💚 Inclusion Story ({cost})", key=f"story_{swap_id}"):
+                            cm.spend('generate_swap_story', swap_id)
+                            # Generate the story using Explainer
+                            from agents.explainer import Explainer
+                            explainer = Explainer()
+                            story = explainer.generate_swap_inclusion_story(swap)
+                            # Store in session state for display
+                            st.session_state.generated_stories[swap_id] = story
+                            st.rerun()
+
+        # Display the generated story if it exists
+        if swap_id in st.session_state.generated_stories:
+            st.markdown("---")
+            st.markdown("**💚 INCLUSION STORY:**")
+            st.info(st.session_state.generated_stories[swap_id])
+
+
+def render_manual_proposals(df, my_lender, cm):
+    """Render manual swap proposal wizard and incoming proposals."""
+    st.markdown("### Create Swap Proposal")
+    st.markdown("Propose a loan swap to any lender - even for unlisted loans.")
+
+    # Get my mismatched loans
+    my_mismatched = df[
+        (df['Current_Lender'] == my_lender) &
+        (df['Is_Mismatch'] == True)
+    ].sort_values('Fit_Gap', ascending=False)
+
+    if len(my_mismatched) == 0:
+        st.success("All your loans are well-matched - no need to swap!")
+    else:
+        # Wizard interface
+        draft = st.session_state.manual_proposal_draft
+
+        # Step 1: Select your loan
+        st.markdown("#### Step 1: Select Your Loan to Offer")
+        loan_options = {}
+        for _, loan in my_mismatched.iterrows():
+            loan_id = loan['SME_ID']
+            fit = round_score(loan['Current_Lender_Fit']) if ANONYMIZE else f"{loan['Current_Lender_Fit']:.0f}"
+            band = band_loan_amount(loan['Outstanding_Balance']) if ANONYMIZE else f"£{loan['Outstanding_Balance']:,.0f}"
+            option_text = f"{loan_id} | {loan['Sector']} | {band} | Fit: {fit}"
+            loan_options[option_text] = loan_id
+
+        selected_my_loan = st.selectbox(
+            "Your mismatched loan:",
+            list(loan_options.keys()),
+            key="wizard_my_loan"
+        )
+        my_loan_id = loan_options[selected_my_loan]
+        my_loan_data = my_mismatched[my_mismatched['SME_ID'] == my_loan_id].iloc[0]
+
+        # Step 2: Select target lender (anonymized)
+        st.markdown("#### Step 2: Select Target Lender")
+        # Show lenders ranked by fit for your loan
+        other_lenders = [l for l in LENDERS.keys() if l != my_lender]
+
+        # In anonymized mode, show as "Lender A", "Lender B", etc.
+        if ANONYMIZE:
+            lender_display = {f"Lender {chr(65+i)}": l for i, l in enumerate(other_lenders)}
+        else:
+            lender_display = {l: l for l in other_lenders}
+
+        selected_target_display = st.selectbox(
+            "Target lender:",
+            list(lender_display.keys()),
+            key="wizard_target_lender"
+        )
+        target_lender = lender_display[selected_target_display]
+
+        # Step 3: Browse their loans (costs credits)
+        st.markdown("#### Step 3: Select Their Loan You Want")
+
+        # Check if already browsed
+        browse_key = f"{my_lender}_{target_lender}"
+        has_browsed = cm.has_viewed_item('browse_unlisted_loans', browse_key)
+
+        if has_browsed:
+            # Show their loans that fit us
+            their_loans = df[
+                (df['Current_Lender'] == target_lender) &
+                (df['Best_Match_Lender'] == my_lender)
+            ].sort_values('Fit_Gap', ascending=False)
+
+            if len(their_loans) == 0:
+                st.info(f"This lender doesn't have loans that fit your portfolio. Try another lender or choose 'Open Swap'.")
+                their_loan_id = None
+            else:
+                their_options = {}
+                for _, loan in their_loans.iterrows():
+                    loan_id = loan['SME_ID']
+                    fit = round_score(loan['Best_Match_Fit']) if ANONYMIZE else f"{loan['Best_Match_Fit']:.0f}"
+                    band = band_loan_amount(loan['Outstanding_Balance']) if ANONYMIZE else f"£{loan['Outstanding_Balance']:,.0f}"
+                    option_text = f"{loan_id} | {loan['Sector']} | {band} | Your Fit: {fit}"
+                    their_options[option_text] = loan_id
+
+                # Add "Open Swap" option
+                their_options["🎲 Open Swap - Let them choose"] = "OPEN"
+
+                selected_their_loan = st.selectbox(
+                    "Their loan you want:",
+                    list(their_options.keys()),
+                    key="wizard_their_loan"
+                )
+                their_loan_id = their_options[selected_their_loan]
+        else:
+            cost = cm.get_cost('browse_unlisted_loans')
+            if cm.can_afford('browse_unlisted_loans'):
+                if st.button(f"🔓 Browse Their Loans ({cost} credits)", key="browse_loans"):
+                    cm.spend('browse_unlisted_loans', browse_key)
+                    st.rerun()
+            else:
+                st.caption(f"Need {cost} credits to browse their loans")
+            their_loan_id = None
+
+        # Step 4: Send proposal
+        if has_browsed:
+            st.markdown("#### Step 4: Send Proposal")
+
+            message = st.text_area(
+                "Optional inclusion story or message:",
+                placeholder="This swap helps an underserved Clean Energy company in Scotland access appropriate financing...",
+                key="wizard_message",
+                max_chars=300
+            )
+
+            cost = cm.get_cost('propose_swap')
+            if cm.can_afford('propose_swap'):
+                if st.button(f"🔄 Send Swap Proposal ({cost} credits)", key="send_wizard_proposal"):
+                    cm.spend('propose_swap', f"{my_loan_id}_{target_lender}")
+                    proposal_id = st.session_state.swap_proposal_counter
+                    st.session_state.swap_proposal_counter += 1
+                    st.session_state.swap_proposals[proposal_id] = {
+                        'proposer_lender': my_lender,
+                        'proposer_loan_id': my_loan_id,
+                        'target_lender': target_lender,
+                        'target_loan_id': their_loan_id,
+                        'status': 'pending',
+                        'message': message,
+                        'created_at': pd.Timestamp.now()
                     }
+                    st.success("Swap proposal sent successfully!")
+                    st.rerun()
+            else:
+                st.caption(f"Need {cost} credits to send proposal")
 
-                    company_data, curr_lender, rec_lender, scores, pricing = prepare_explanation_data(
-                        row, current_lender, recommended_lender, pricing_details, anonymize=ANONYMIZE
-                    )
+    # Show incoming proposals
+    st.markdown("---")
+    st.markdown("### 📬 Incoming Swap Proposals")
 
-                    explanation = explainer.generate_explanation(
-                        company_data, curr_lender, rec_lender, scores, pricing
-                    )
-                    st.markdown("**🤖 AI Explanation:**")
-                    st.info(explanation)
-                else:
-                    cost = cm.get_cost('generate_explanation')
-                    if cm.can_afford('generate_explanation'):
-                        if st.button(f"🤖 Generate AI Explanation ({cost} credits)", key=explanation_key):
-                            cm.spend('generate_explanation', sme_id)
-                            st.rerun()
-                    else:
-                        st.warning(f"⚠️ Need {cost} credits to generate AI explanation.")
+    incoming = [p for pid, p in st.session_state.swap_proposals.items()
+                if p['target_lender'] == my_lender and p['status'] == 'pending']
 
-                # Express Interest button
-                st.markdown("---")
-                interest_key = f"interest_{sme_id}"
-                has_expressed = cm.has_viewed_item('express_interest', sme_id)
+    if len(incoming) == 0:
+        st.info("No incoming swap proposals at this time.")
+    else:
+        st.info(f"You have **{len(incoming)}** incoming swap proposal(s)")
 
-                if has_expressed:
-                    st.success("✅ Interest expressed! You will be notified when counterparty responds.")
-                else:
-                    cost = cm.get_cost('express_interest')
-                    if cm.can_afford('express_interest'):
-                        if st.button(f"🤝 Express Interest ({cost} credits)", key=interest_key):
-                            cm.spend('express_interest', sme_id)
-                            st.rerun()
-                    else:
-                        st.caption(f"💡 Express interest requires {cost} credits")
+        for proposal in incoming:
+            render_incoming_proposal(proposal, my_lender, cm, df)
+
+
+def render_incoming_proposal(proposal, my_lender, cm, df):
+    """Render an incoming swap proposal card."""
+    proposer = proposal['proposer_lender']
+    proposer_display = anonymize_lender(proposer, is_current=False) if ANONYMIZE else proposer
+
+    with st.expander(f"📩 Proposal from {proposer_display}", expanded=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**THEY OFFER:**")
+            # Get proposer's loan details
+            proposer_loan = df[df['SME_ID'] == proposal['proposer_loan_id']]
+            if len(proposer_loan) > 0:
+                loan = proposer_loan.iloc[0]
+                fit = round_score(loan['Best_Match_Fit']) if ANONYMIZE else f"{loan['Best_Match_Fit']:.0f}"
+                band = band_loan_amount(loan['Outstanding_Balance']) if ANONYMIZE else f"£{loan['Outstanding_Balance']:,.0f}"
+                st.markdown(f"**Loan:** {loan['SME_ID']}")
+                st.markdown(f"**Sector:** {loan['Sector']}")
+                st.markdown(f"**Outstanding:** {band}")
+                st.markdown(f"**Your Fit:** {fit}/100")
+
+        with col2:
+            st.markdown("**THEY WANT:**")
+            if proposal['target_loan_id'] == "OPEN":
+                st.markdown("🎲 *Open Swap - You choose which loan*")
+            else:
+                target_loan = df[df['SME_ID'] == proposal['target_loan_id']]
+                if len(target_loan) > 0:
+                    loan = target_loan.iloc[0]
+                    fit = round_score(loan['Current_Lender_Fit']) if ANONYMIZE else f"{loan['Current_Lender_Fit']:.0f}"
+                    band = band_loan_amount(loan['Outstanding_Balance']) if ANONYMIZE else f"£{loan['Outstanding_Balance']:,.0f}"
+                    st.markdown(f"**Loan:** {loan['SME_ID']}")
+                    st.markdown(f"**Sector:** {loan['Sector']}")
+                    st.markdown(f"**Outstanding:** {band}")
+                    st.markdown(f"**Your Fit:** {fit}/100")
+
+        # Show message if any
+        if proposal.get('message'):
+            st.markdown("---")
+            st.markdown("**Their message:**")
+            st.info(proposal['message'])
+
+        # Actions
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            cost = cm.get_cost('accept_swap')
+            if cm.can_afford('accept_swap'):
+                if st.button(f"✅ Accept Swap ({cost} credits)", key=f"accept_proposal_{proposal['proposer_loan_id']}"):
+                    cm.spend('accept_swap', proposal['proposer_loan_id'])
+                    proposal['status'] = 'accepted'
+                    st.success("Swap accepted! Both parties will be notified.")
+                    st.rerun()
+            else:
+                st.caption(f"Need {cost} credits")
+
+        with col2:
+            if st.button("❌ Decline", key=f"decline_proposal_{proposal['proposer_loan_id']}"):
+                proposal['status'] = 'declined'
+                st.info("Proposal declined.")
+                st.rerun()
 
 
 def render_lender_view(df):
@@ -879,8 +1668,10 @@ def main():
         render_portfolio_overview(df)
     elif page == "🏢 Company Analysis":
         render_company_analysis(df)
-    elif page == "🔄 Swap Recommendations":
-        render_swap_recommendations(df)
+    elif page == "💵 Loan Sales":
+        render_loan_sales(df)
+    elif page == "🔄 Loan Swaps":
+        render_loan_swaps(df)
     elif page == "🏛️ Lender View":
         render_lender_view(df)
     elif page == "📈 Market Insights":

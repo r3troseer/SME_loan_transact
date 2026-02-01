@@ -320,6 +320,70 @@ Emphasize the virtuous cycle: more appropriate loans -> more business success ->
             f"of successful lending, business growth, and increased capital availability."
         )
 
+    def generate_swap_inclusion_story(self, swap_data: Dict) -> str:
+        """
+        Generate an inclusion-focused story for a loan swap.
+
+        Args:
+            swap_data: Dictionary containing swap details including:
+                - loan_a_sector, loan_a_region, loan_a_inclusion_score
+                - loan_b_sector, loan_b_region, loan_b_inclusion_score
+                - total_fit_improvement
+                - is_inclusion_swap
+
+        Returns:
+            Inclusion-focused narrative about the swap's impact
+        """
+        loan_a_sector = swap_data.get('loan_a_sector', 'Unknown')
+        loan_a_region = swap_data.get('loan_a_region', 'Unknown')
+        loan_a_inclusion = swap_data.get('loan_a_inclusion_score', 0)
+        loan_b_sector = swap_data.get('loan_b_sector', 'Unknown')
+        loan_b_region = swap_data.get('loan_b_region', 'Unknown')
+        loan_b_inclusion = swap_data.get('loan_b_inclusion_score', 0)
+        fit_improvement = swap_data.get('total_fit_improvement', 0)
+
+        if self.client:
+            prompt = f"""Generate a 2-3 sentence inclusion-focused story about this loan swap.
+Focus on how the swap benefits underserved companies and improves financial inclusion.
+
+SWAP DETAILS:
+- Loan A: {loan_a_sector} sector in {loan_a_region}, Inclusion Score: {loan_a_inclusion}/100
+- Loan B: {loan_b_sector} sector in {loan_b_region}, Inclusion Score: {loan_b_inclusion}/100
+- Combined Fit Improvement: +{fit_improvement} points
+
+The story should emphasize:
+1. How mismatched loans can disadvantage SMEs in underserved regions/sectors
+2. How this swap helps both companies access lenders who understand their needs
+3. The virtuous cycle: appropriate lending → business success → more capital → more lending
+
+Keep the tone professional but impactful. Avoid hyperbole."""
+
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=prompt
+                )
+                return response.text
+            except Exception:
+                pass
+
+        # Fallback template - use the loan with higher inclusion score
+        if loan_a_inclusion > loan_b_inclusion:
+            higher_region = loan_a_region
+            higher_sector = loan_a_sector
+        else:
+            higher_region = loan_b_region
+            higher_sector = loan_b_sector
+
+        return (
+            f"This swap enables a {higher_sector} company in {higher_region} to access "
+            f"a lender better suited to support businesses in their region and sector. "
+            f"With a combined fit improvement of +{fit_improvement} points, both companies "
+            f"gain access to lenders who understand their specific needs. "
+            f"This creates a virtuous cycle: appropriate financing leads to business success, "
+            f"which increases demand for lending in underserved areas."
+        )
+
 
 def prepare_explanation_data(company, current_lender_profile, recommended_lender_profile, pricing_details, anonymize: bool = True) -> tuple:
     """
