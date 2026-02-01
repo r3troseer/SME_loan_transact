@@ -5,8 +5,8 @@ from typing import Optional, Dict, Any, List
 class CompanyDetail(BaseModel):
     id: int
     sme_id: str
-    sector: str
-    region: str
+    sector: Optional[str]
+    region: Optional[str]
     turnover: Optional[float]
     turnover_banded: Optional[str]
     employees: Optional[int]

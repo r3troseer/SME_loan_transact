@@ -5,10 +5,10 @@ from typing import Optional, Dict, Any
 class SimulatorCandidate(BaseModel):
     loan_id: int
     company_id: str
-    sector: str
-    region: str
-    current_lender: str
-    best_match_lender: str  # Anonymized
+    sector: Optional[str]
+    region: Optional[str]
+    current_lender: Optional[str]
+    best_match_lender: Optional[str]  # Anonymized
     outstanding_balance: float
     outstanding_balance_banded: str
     fit_gap: Optional[float]
@@ -29,8 +29,8 @@ class LoanFullDetails(BaseModel):
 
     # Company info
     company_id: str
-    sector: str
-    region: str
+    sector: Optional[str]
+    region: Optional[str]
     turnover: Optional[float]
     risk_score: Optional[float]
     risk_category: Optional[str]

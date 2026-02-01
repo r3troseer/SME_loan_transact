@@ -6,13 +6,13 @@ from datetime import datetime
 class LoanOpportunity(BaseModel):
     loan_id: int
     company_id: str
-    sector: str
-    region: str
+    sector: Optional[str]
+    region: Optional[str]
     seller_lender: str  # Anonymized
 
-    outstanding_balance: float
-    outstanding_balance_banded: str
-    years_remaining: float
+    outstanding_balance: Optional[float]
+    outstanding_balance_banded: Optional[str]
+    years_remaining: Optional[float]
 
     risk_score: Optional[float]
     risk_category: Optional[str]
@@ -36,12 +36,12 @@ class LoanOpportunity(BaseModel):
 class MyLoan(BaseModel):
     loan_id: int
     company_id: str
-    sector: str
-    region: str
+    sector: Optional[str]
+    region: Optional[str]
 
-    outstanding_balance: float
-    outstanding_balance_banded: str
-    years_remaining: float
+    outstanding_balance: Optional[float]
+    outstanding_balance_banded: Optional[str]
+    years_remaining: Optional[float]
 
     risk_score: Optional[float]
     current_fit: Optional[float]

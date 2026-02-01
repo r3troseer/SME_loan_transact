@@ -7,8 +7,8 @@ class AutoSwapMatch(BaseModel):
     # Your loan (giving away)
     give_loan_id: int
     give_company_id: str
-    give_sector: str
-    give_region: str
+    give_sector: Optional[str]
+    give_region: Optional[str]
     give_value: float
     give_value_banded: str
     give_your_fit: Optional[float]
@@ -18,8 +18,8 @@ class AutoSwapMatch(BaseModel):
     # Their loan (receiving)
     receive_loan_id: int
     receive_company_id: str
-    receive_sector: str
-    receive_region: str
+    receive_sector: Optional[str]
+    receive_region: Optional[str]
     receive_value: float
     receive_value_banded: str
     receive_their_fit: Optional[float]

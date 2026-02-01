@@ -12,12 +12,12 @@ class PortfolioOverview(BaseModel):
 
 
 class SectorDistribution(BaseModel):
-    sector: str
+    sector: Optional[str]
     count: int
 
 
 class RegionDistribution(BaseModel):
-    region: str
+    region: Optional[str]
     count: int
 
 
@@ -30,8 +30,8 @@ class LenderDistribution(BaseModel):
 class CompanyListItem(BaseModel):
     id: int
     sme_id: str
-    sector: str
-    region: str
+    sector: Optional[str]
+    region: Optional[str]
     turnover: Optional[float]
     risk_score: Optional[float]
     risk_category: Optional[str]
