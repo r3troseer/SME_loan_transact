@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "6000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./agents:/app/agents
+      - ./lenders:/app/lenders
+      - ./utils:/app/utils
+    environment:
+      - DATABASE_URL=sqlite:///./data/gfa.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:80","http://frontend:80"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "4000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+networks:
+  default:
+    name: gfa-network
