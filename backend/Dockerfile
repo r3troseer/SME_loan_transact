@@ -26,5 +26,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Create startup script that runs migration then starts server
+RUN echo '#!/bin/bash\necho "Running data migration..."\npython -m app.services.data_loader || echo "Migration failed or skipped"\necho "Starting server..."\nexec uvicorn app.main:app --host 0.0.0.0 --port 8000' > /app/start.sh && chmod +x /app/start.sh
+
+# Run the application with migration
+CMD ["/bin/bash", "/app/start.sh"]
