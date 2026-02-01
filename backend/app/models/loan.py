@@ -28,7 +28,7 @@ class Loan(Base):
     best_match_reasons = Column(JSON)
     fit_gap = Column(Float)
     reallocation_status = Column(String)  # STRONG, MODERATE, MINOR, ADEQUATE
-    is_mismatch = Column(Boolean, default=False)
+    is_unalign = Column(Boolean, default=False)
 
     # Pricer analysis (from Pricer agent)
     default_probability = Column(Float)
@@ -45,5 +45,7 @@ class Loan(Base):
 
     # Relationships
     company = relationship("Company", back_populates="loans")
-    current_lender = relationship("Lender", foreign_keys=[current_lender_id], back_populates="loans")
+    current_lender = relationship(
+        "Lender", foreign_keys=[current_lender_id], back_populates="loans"
+    )
     best_match_lender = relationship("Lender", foreign_keys=[best_match_lender_id])

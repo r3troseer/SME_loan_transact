@@ -27,8 +27,8 @@ export const companyApi = {
 export const marketplaceApi = {
   getOpportunities: (lenderId: number, sector?: string, minRoi?: number) =>
     api.get('/marketplace/opportunities', { params: { lender_id: lenderId, sector, min_roi: minRoi } }),
-  getMyLoans: (lenderId: number, mismatchedOnly = true) =>
-    api.get('/marketplace/my-loans', { params: { lender_id: lenderId, mismatched_only: mismatchedOnly } }),
+  getMyLoans: (lenderId: number, unalignedOnly = true) =>
+    api.get('/marketplace/my-loans', { params: { lender_id: lenderId, unaligned_only: unalignedOnly } }),
   listLoan: (loanId: number, lenderId: number) =>
     api.post('/marketplace/list', { loan_id: loanId, lender_id: lenderId }),
   submitBid: (loanId: number, lenderId: number, discountPercent: number) =>

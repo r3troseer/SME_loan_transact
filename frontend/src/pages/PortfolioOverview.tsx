@@ -61,10 +61,10 @@ export default function PortfolioOverview() {
               icon="visibility_off"
             />
             <MetricCard
-              label="Mismatched Loans"
-              value={`${overview?.mismatch_percentage || 0}%`}
-              badge={overview?.mismatch_percentage > 10 ? '+' : ''}
-              badgeColor={overview?.mismatch_percentage > 15 ? 'orange' : 'teal'}
+              label="Unaligned Loans"
+              value={`${overview?.unalign_percentage || 0}%`}
+              badge={overview?.unalign_percentage > 10 ? '+' : ''}
+              badgeColor={overview?.unalign_percentage > 15 ? 'orange' : 'teal'}
             />
             <MetricCard
               label="Avg Risk Score"
@@ -118,7 +118,7 @@ export default function PortfolioOverview() {
               <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
                   <h4 className="text-white font-bold">Reallocation Hotspots</h4>
-                  <p className="text-slate-400 text-xs">Regions with highest mismatch rates</p>
+                  <p className="text-slate-400 text-xs">Regions with highest unalign rates</p>
                 </div>
               </div>
               <div className="w-full h-64 rounded bg-slate-900/50 relative overflow-hidden flex items-center justify-center">

@@ -28,6 +28,9 @@ def reset_anonymization():
 
 def group_region(region: str) -> str:
     """Group UK regions into larger categories"""
+    if region is None:
+        return "Unknown"
+
     region_groups = {
         # Northern England
         "North East": "Northern England",
@@ -41,6 +44,7 @@ def group_region(region: str) -> str:
         "South East": "Southern England",
         "South West": "Southern England",
         "East of England": "Southern England",
+        "East Of England": "Southern England",
         "East": "Southern England",
         # London
         "London": "Greater London",

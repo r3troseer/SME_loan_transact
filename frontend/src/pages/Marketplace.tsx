@@ -139,7 +139,7 @@ export default function Marketplace() {
                 ) : (
                   <div className="text-center py-12 text-slate-500">
                     <span className="material-symbols-outlined text-4xl mb-2">inventory_2</span>
-                    <p>No mismatched loans in your portfolio</p>
+                    <p>No unaligned loans in your portfolio</p>
                   </div>
                 )
               ) : (

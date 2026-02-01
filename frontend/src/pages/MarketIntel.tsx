@@ -53,8 +53,8 @@ export default function MarketIntel() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <MetricCard
               label="Reallocation Candidates"
-              value={reallocationStats?.mismatched_count || 0}
-              badge={`${reallocationStats?.mismatched_percentage?.toFixed(1) || 0}% of total`}
+              value={reallocationStats?.unaligned_count || 0}
+              badge={`${reallocationStats?.unaligned_percentage?.toFixed(1) || 0}% of total`}
               badgeColor="orange"
             />
             <MetricCard

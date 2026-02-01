@@ -274,7 +274,7 @@ export default function Simulator() {
                   <h4 className="text-white font-bold mb-2">AI Swap Analysis</h4>
                   <p className="text-slate-300 text-sm mb-4">
                     {activeTab === 'sale' ? (
-                      `Selling Loan #${simulation.outgoing_loan_id} at suggested price of £${simulation.outgoing_value.toLocaleString()} provides liquidity while releasing a mismatched asset from your portfolio.`
+                      `Selling Loan #${simulation.outgoing_loan_id} at suggested price of £${simulation.outgoing_value.toLocaleString()} provides liquidity while releasing a unaligned asset from your portfolio.`
                     ) : (
                       `Swapping Loan #${simulation.outgoing_loan_id} for Bond #${simulation.incoming_loan_id} is highly efficient. You shed a high-risk asset while acquiring a stable Agri-Tech bond that aligns with your ESG mandate. Conversely, the counterparty gains exposure to a sector where they have excess risk appetite, without cash outlay.`
                     )}

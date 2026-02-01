@@ -24,9 +24,9 @@ async def get_inclusion_analysis(db: Session = Depends(get_db)):
             Company.region,
             func.count(Company.id).label("count"),
             func.avg(Company.inclusion_score).label("avg_inclusion"),
-            func.sum(
-                func.cast(Company.inclusion_score >= 60, Integer)
-            ).label("high_priority_count"),
+            func.sum(func.cast(Company.inclusion_score >= 60, Integer)).label(
+                "high_priority_count"
+            ),
         )
         .group_by(Company.region)
         .all()
@@ -49,13 +49,19 @@ async def get_inclusion_analysis(db: Session = Depends(get_db)):
     regions = []
     for region, data in regional_data.items():
         avg = data["total_inclusion"] / data["count"] if data["count"] > 0 else 0
-        regions.append(RegionalInclusion(
-            region=region,
-            company_count=data["count"],
-            avg_inclusion_score=round(avg, 1),
-            high_priority_count=data["high_priority"],
-            inclusion_percentage=round(data["high_priority"] / data["count"] * 100, 1) if data["count"] > 0 else 0,
-        ))
+        regions.append(
+            RegionalInclusion(
+                region=region,
+                company_count=data["count"],
+                avg_inclusion_score=round(avg, 1),
+                high_priority_count=data["high_priority"],
+                inclusion_percentage=round(
+                    data["high_priority"] / data["count"] * 100, 1
+                )
+                if data["count"] > 0
+                else 0,
+            )
+        )
 
     # Sort by inclusion percentage descending
     regions.sort(key=lambda x: x.inclusion_percentage, reverse=True)
@@ -68,7 +74,9 @@ async def get_inclusion_analysis(db: Session = Depends(get_db)):
         regions=regions,
         total_companies=total_companies,
         total_high_priority=total_high_priority,
-        overall_inclusion_rate=round(total_high_priority / total_companies * 100, 1) if total_companies > 0 else 0,
+        overall_inclusion_rate=round(total_high_priority / total_companies * 100, 1)
+        if total_companies > 0
+        else 0,
     )
 
 
@@ -85,26 +93,24 @@ async def get_lender_flows(db: Session = Depends(get_db)):
     for lender in lenders:
         # Current portfolio
         current_count = (
-            db.query(Loan)
-            .filter(Loan.current_lender_id == lender.id)
-            .count()
+            db.query(Loan).filter(Loan.current_lender_id == lender.id).count()
         )
         current_value = (
             db.query(func.sum(Loan.outstanding_balance))
             .filter(Loan.current_lender_id == lender.id)
-            .scalar() or 0
+            .scalar()
+            or 0
         )
 
         # Optimal portfolio (where this lender is best match)
         optimal_count = (
-            db.query(Loan)
-            .filter(Loan.best_match_lender_id == lender.id)
-            .count()
+            db.query(Loan).filter(Loan.best_match_lender_id == lender.id).count()
         )
         optimal_value = (
             db.query(func.sum(Loan.outstanding_balance))
             .filter(Loan.best_match_lender_id == lender.id)
-            .scalar() or 0
+            .scalar()
+            or 0
         )
 
         # Inbound (loans from others that fit better here)
@@ -123,22 +129,24 @@ async def get_lender_flows(db: Session = Depends(get_db)):
             .filter(
                 Loan.current_lender_id == lender.id,
                 Loan.best_match_lender_id != lender.id,
-                Loan.is_mismatch == True,
+                Loan.is_unalign == True,
             )
             .count()
         )
 
-        flows.append(LenderFlow(
-            lender_id=lender.id,
-            lender_name=lender.name,
-            current_count=current_count,
-            current_value=current_value,
-            optimal_count=optimal_count,
-            optimal_value=optimal_value,
-            inbound_count=inbound_count,
-            outbound_count=outbound_count,
-            net_flow=inbound_count - outbound_count,
-        ))
+        flows.append(
+            LenderFlow(
+                lender_id=lender.id,
+                lender_name=lender.name,
+                current_count=current_count,
+                current_value=current_value,
+                optimal_count=optimal_count,
+                optimal_value=optimal_value,
+                inbound_count=inbound_count,
+                outbound_count=outbound_count,
+                net_flow=inbound_count - outbound_count,
+            )
+        )
 
     return flows
 
@@ -149,31 +157,29 @@ async def get_reallocation_stats(db: Session = Depends(get_db)):
     # Total loans
     total_loans = db.query(Loan).count()
 
-    # Mismatched loans
-    mismatched = db.query(Loan).filter(Loan.is_mismatch == True).all()
-    mismatched_count = len(mismatched)
+    # Unaligned loans
+    unaligned = db.query(Loan).filter(Loan.is_unalign == True).all()
+    unaligned_count = len(unaligned)
 
-    # Total value at risk (sum of mismatched loan values)
-    total_value = sum(l.outstanding_balance for l in mismatched)
+    # Total value at risk (sum of unaligned loan values)
+    total_value = sum(l.outstanding_balance for l in unaligned)
 
     # Average fit improvement
     avg_improvement = (
-        db.query(func.avg(Loan.fit_gap))
-        .filter(Loan.is_mismatch == True)
-        .scalar() or 0
+        db.query(func.avg(Loan.fit_gap)).filter(Loan.is_unalign == True).scalar() or 0
     )
 
     # By reallocation status
-    strong = len([l for l in mismatched if l.reallocation_status == "STRONG"])
-    moderate = len([l for l in mismatched if l.reallocation_status == "MODERATE"])
-    minor = len([l for l in mismatched if l.reallocation_status == "MINOR"])
+    strong = len([l for l in unaligned if l.reallocation_status == "STRONG"])
+    moderate = len([l for l in unaligned if l.reallocation_status == "MODERATE"])
+    minor = len([l for l in unaligned if l.reallocation_status == "MINOR"])
 
-    # High inclusion priority among mismatched
-    high_inclusion_mismatched = (
+    # High inclusion priority among unaligned
+    high_inclusion_unaligned = (
         db.query(Loan)
         .join(Company, Loan.company_id == Company.id)
         .filter(
-            Loan.is_mismatch == True,
+            Loan.is_unalign == True,
             Company.inclusion_score >= 60,
         )
         .count()
@@ -181,12 +187,14 @@ async def get_reallocation_stats(db: Session = Depends(get_db)):
 
     return ReallocationStats(
         total_loans=total_loans,
-        mismatched_count=mismatched_count,
-        mismatched_percentage=round(mismatched_count / total_loans * 100, 1) if total_loans > 0 else 0,
+        unaligned_count=unaligned_count,
+        unaligned_percentage=round(unaligned_count / total_loans * 100, 1)
+        if total_loans > 0
+        else 0,
         total_value_at_risk=total_value,
         avg_fit_improvement=round(avg_improvement, 1),
         strong_reallocation_count=strong,
         moderate_reallocation_count=moderate,
         minor_reallocation_count=minor,
-        high_inclusion_priority_count=high_inclusion_mismatched,
+        high_inclusion_priority_count=high_inclusion_unaligned,
     )

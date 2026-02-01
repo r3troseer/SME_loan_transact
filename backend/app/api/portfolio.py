@@ -26,10 +26,10 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
     # Total loan value
     total_loan_value = db.query(func.sum(Loan.outstanding_balance)).scalar() or 0
 
-    # Mismatched loans
+    # Unaligned loans
     total_loans = db.query(Loan).count()
-    mismatched_loans = db.query(Loan).filter(Loan.is_mismatch == True).count()
-    mismatch_percentage = (mismatched_loans / total_loans * 100) if total_loans > 0 else 0
+    unaligned_loans = db.query(Loan).filter(Loan.is_unalign == True).count()
+    unalign_percentage = (unaligned_loans / total_loans * 100) if total_loans > 0 else 0
 
     # Average risk score
     avg_risk_score = db.query(func.avg(Company.risk_score)).scalar() or 0
@@ -38,8 +38,8 @@ async def get_portfolio_overview(db: Session = Depends(get_db)):
         total_companies=total_companies,
         total_loan_value=total_loan_value,
         total_loan_value_banded=band_amount(total_loan_value),
-        mismatched_loans=mismatched_loans,
-        mismatch_percentage=round(mismatch_percentage, 1),
+        unaligned_loans=unaligned_loans,
+        unalign_percentage=round(unalign_percentage, 1),
         avg_risk_score=round(avg_risk_score, 1),
     )
 
@@ -54,16 +54,13 @@ async def get_by_sector(db: Session = Depends(get_db)):
         .all()
     )
 
-    return [
-        SectorDistribution(sector=sector, count=count)
-        for sector, count in results
-    ]
+    return [SectorDistribution(sector=sector, count=count) for sector, count in results]
 
 
 @router.get("/by-region", response_model=list[RegionDistribution])
 async def get_by_region(
     grouped: bool = Query(True, description="Group regions into larger categories"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Get company distribution by region"""
     results = (
@@ -80,15 +77,18 @@ async def get_by_region(
             grouped_counts[group] = grouped_counts.get(group, 0) + count
 
         return sorted(
-            [RegionDistribution(region=region, count=count) for region, count in grouped_counts.items()],
+            [
+                RegionDistribution(region=region, count=count)
+                for region, count in grouped_counts.items()
+            ],
             key=lambda x: x.count,
-            reverse=True
+            reverse=True,
         )
 
     return sorted(
         [RegionDistribution(region=region, count=count) for region, count in results],
         key=lambda x: x.count,
-        reverse=True
+        reverse=True,
     )
 
 
@@ -109,7 +109,7 @@ async def get_lender_distribution(db: Session = Depends(get_db)):
         LenderDistribution(
             lender=name,
             count=count,
-            percentage=round(count / total * 100, 1) if total > 0 else 0
+            percentage=round(count / total * 100, 1) if total > 0 else 0,
         )
         for name, count in results
     ]
@@ -121,7 +121,7 @@ async def get_companies(
     limit: int = Query(50, ge=1, le=100),
     sector: Optional[str] = None,
     region: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Get paginated list of companies"""
     query = db.query(Company)

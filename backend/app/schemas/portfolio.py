@@ -6,8 +6,8 @@ class PortfolioOverview(BaseModel):
     total_companies: int
     total_loan_value: float
     total_loan_value_banded: str
-    mismatched_loans: int
-    mismatch_percentage: float
+    unaligned_loans: int
+    unalign_percentage: float
     avg_risk_score: float
 
 

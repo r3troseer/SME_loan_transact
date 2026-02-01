@@ -31,8 +31,8 @@ class LenderFlow(BaseModel):
 
 class ReallocationStats(BaseModel):
     total_loans: int
-    mismatched_count: int
-    mismatched_percentage: float
+    unaligned_count: int
+    unaligned_percentage: float
     total_value_at_risk: float
     avg_fit_improvement: float
     strong_reallocation_count: int

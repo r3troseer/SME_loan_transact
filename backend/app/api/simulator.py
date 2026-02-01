@@ -18,13 +18,13 @@ router = APIRouter()
 @router.get("/candidates", response_model=list[SimulatorCandidate])
 async def get_candidates(
     lender_id: Optional[int] = Query(None, description="Filter by lender"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Get loans that are candidates for reallocation simulation"""
     query = (
         db.query(Loan, Company)
         .join(Company, Loan.company_id == Company.id)
-        .filter(Loan.is_mismatch == True)
+        .filter(Loan.is_unalign == True)
     )
 
     if lender_id:
@@ -34,23 +34,33 @@ async def get_candidates(
 
     candidates = []
     for loan, company in results:
-        current_lender = db.query(Lender).filter(Lender.id == loan.current_lender_id).first()
-        best_lender = db.query(Lender).filter(Lender.id == loan.best_match_lender_id).first() if loan.best_match_lender_id else None
+        current_lender = (
+            db.query(Lender).filter(Lender.id == loan.current_lender_id).first()
+        )
+        best_lender = (
+            db.query(Lender).filter(Lender.id == loan.best_match_lender_id).first()
+            if loan.best_match_lender_id
+            else None
+        )
 
-        candidates.append(SimulatorCandidate(
-            loan_id=loan.id,
-            company_id=company.sme_id,
-            sector=company.sector,
-            region=company.region,
-            current_lender=current_lender.name if current_lender else "Unknown",
-            best_match_lender=anonymize_lender(best_lender.name) if best_lender else "Unknown",
-            outstanding_balance=loan.outstanding_balance,
-            outstanding_balance_banded=band_amount(loan.outstanding_balance),
-            fit_gap=loan.fit_gap,
-            reallocation_status=loan.reallocation_status,
-            risk_score=company.risk_score,
-            inclusion_score=company.inclusion_score,
-        ))
+        candidates.append(
+            SimulatorCandidate(
+                loan_id=loan.id,
+                company_id=company.sme_id,
+                sector=company.sector,
+                region=company.region,
+                current_lender=current_lender.name if current_lender else "Unknown",
+                best_match_lender=anonymize_lender(best_lender.name)
+                if best_lender
+                else "Unknown",
+                outstanding_balance=loan.outstanding_balance,
+                outstanding_balance_banded=band_amount(loan.outstanding_balance),
+                fit_gap=loan.fit_gap,
+                reallocation_status=loan.reallocation_status,
+                risk_score=company.risk_score,
+                inclusion_score=company.inclusion_score,
+            )
+        )
 
     return sorted(candidates, key=lambda x: x.fit_gap or 0, reverse=True)
 
@@ -63,8 +73,14 @@ async def get_loan_details(loan_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Loan not found")
 
     company = db.query(Company).filter(Company.id == loan.company_id).first()
-    current_lender = db.query(Lender).filter(Lender.id == loan.current_lender_id).first()
-    best_lender = db.query(Lender).filter(Lender.id == loan.best_match_lender_id).first() if loan.best_match_lender_id else None
+    current_lender = (
+        db.query(Lender).filter(Lender.id == loan.current_lender_id).first()
+    )
+    best_lender = (
+        db.query(Lender).filter(Lender.id == loan.best_match_lender_id).first()
+        if loan.best_match_lender_id
+        else None
+    )
 
     return LoanFullDetails(
         # Loan info
@@ -91,7 +107,9 @@ async def get_loan_details(loan_id: int, db: Session = Depends(get_db)):
         current_fit_reasons=loan.current_fit_reasons,
         # Best match lender
         best_match_lender_id=best_lender.id if best_lender else None,
-        best_match_lender_name=anonymize_lender(best_lender.name) if best_lender else None,
+        best_match_lender_name=anonymize_lender(best_lender.name)
+        if best_lender
+        else None,
         best_match_fit=loan.best_match_fit,
         best_match_reasons=loan.best_match_reasons,
         fit_gap=loan.fit_gap,
@@ -113,8 +131,7 @@ async def get_loan_details(loan_id: int, db: Session = Depends(get_db)):
 
 @router.post("/calculate", response_model=SimulationResult)
 async def calculate_simulation(
-    request: SimulationRequest,
-    db: Session = Depends(get_db)
+    request: SimulationRequest, db: Session = Depends(get_db)
 ):
     """Calculate simulation for a swap or sale transaction"""
     # Get outgoing loan
@@ -122,15 +139,20 @@ async def calculate_simulation(
     if not outgoing_loan:
         raise HTTPException(status_code=404, detail="Outgoing loan not found")
 
-    outgoing_company = db.query(Company).filter(Company.id == outgoing_loan.company_id).first()
-    outgoing_lender = db.query(Lender).filter(Lender.id == outgoing_loan.current_lender_id).first()
+    outgoing_company = (
+        db.query(Company).filter(Company.id == outgoing_loan.company_id).first()
+    )
+    outgoing_lender = (
+        db.query(Lender).filter(Lender.id == outgoing_loan.current_lender_id).first()
+    )
 
     # Initialize result
     result = {
         "transaction_type": request.transaction_type,
         "outgoing_loan_id": outgoing_loan.id,
         "outgoing_company_id": outgoing_company.sme_id,
-        "outgoing_value": outgoing_loan.suggested_price or outgoing_loan.outstanding_balance,
+        "outgoing_value": outgoing_loan.suggested_price
+        or outgoing_loan.outstanding_balance,
         "outgoing_risk_score": outgoing_company.risk_score,
         "outgoing_fit": outgoing_loan.current_lender_fit,
         "incoming_loan_id": None,
@@ -146,31 +168,47 @@ async def calculate_simulation(
 
     if request.transaction_type == "sale":
         # Simple sale - buyer pays suggested price
-        result["net_settlement"] = -(outgoing_loan.suggested_price or outgoing_loan.outstanding_balance)
+        result["net_settlement"] = -(
+            outgoing_loan.suggested_price or outgoing_loan.outstanding_balance
+        )
         result["is_zero_cash"] = False
 
     elif request.transaction_type in ["swap", "swap_cash"]:
         # Get incoming loan
         if not request.incoming_loan_id:
-            raise HTTPException(status_code=400, detail="Incoming loan required for swap")
+            raise HTTPException(
+                status_code=400, detail="Incoming loan required for swap"
+            )
 
-        incoming_loan = db.query(Loan).filter(Loan.id == request.incoming_loan_id).first()
+        incoming_loan = (
+            db.query(Loan).filter(Loan.id == request.incoming_loan_id).first()
+        )
         if not incoming_loan:
             raise HTTPException(status_code=404, detail="Incoming loan not found")
 
-        incoming_company = db.query(Company).filter(Company.id == incoming_loan.company_id).first()
+        incoming_company = (
+            db.query(Company).filter(Company.id == incoming_loan.company_id).first()
+        )
 
-        incoming_value = incoming_loan.suggested_price or incoming_loan.outstanding_balance
-        outgoing_value = outgoing_loan.suggested_price or outgoing_loan.outstanding_balance
+        incoming_value = (
+            incoming_loan.suggested_price or incoming_loan.outstanding_balance
+        )
+        outgoing_value = (
+            outgoing_loan.suggested_price or outgoing_loan.outstanding_balance
+        )
 
         result["incoming_loan_id"] = incoming_loan.id
         result["incoming_company_id"] = incoming_company.sme_id
         result["incoming_value"] = incoming_value
         result["incoming_risk_score"] = incoming_company.risk_score
-        result["incoming_fit"] = incoming_loan.best_match_fit  # Your fit for incoming loan
+        result["incoming_fit"] = (
+            incoming_loan.best_match_fit
+        )  # Your fit for incoming loan
 
         result["valuation_delta"] = outgoing_value - incoming_value
-        result["total_fit_improvement"] = (outgoing_loan.fit_gap or 0) + (incoming_loan.fit_gap or 0)
+        result["total_fit_improvement"] = (outgoing_loan.fit_gap or 0) + (
+            incoming_loan.fit_gap or 0
+        )
 
         if request.transaction_type == "swap":
             # Pure swap - try for zero cash

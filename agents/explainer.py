@@ -25,16 +25,19 @@ class Explainer:
         Args:
             api_key: Gemini API key. If None, tries to load from environment.
         """
-        self.api_key = api_key or os.getenv('GEMINI_API_KEY')
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.client = None
 
         if self.api_key:
             try:
                 from google import genai
+
                 self.client = genai.Client(api_key=self.api_key)
-                self.model = 'gemini-2.5-flash'
+                self.model = "gemini-2.5-flash"
             except ImportError:
-                print("Warning: google-genai package not installed. Using template-based explanations.")
+                print(
+                    "Warning: google-genai package not installed. Using template-based explanations."
+                )
             except Exception as e:
                 print(f"Warning: Could not initialize Gemini client: {e}")
 
@@ -44,7 +47,7 @@ class Explainer:
         current_lender: Dict,
         recommended_lender: Dict,
         scores: Dict,
-        pricing: Dict
+        pricing: Dict,
     ) -> str:
         """
         Generate a natural language explanation for a reallocation recommendation.
@@ -74,7 +77,7 @@ class Explainer:
         current_lender: Dict,
         recommended_lender: Dict,
         scores: Dict,
-        pricing: Dict
+        pricing: Dict,
     ) -> str:
         """Generate explanation using Gemini API."""
 
@@ -94,14 +97,14 @@ class Explainer:
                 return f"{val}%"
             return f"{val:.1f}%" if val else "0%"
 
-        risk_score = format_score(scores.get('risk_score', 0))
-        inclusion_score = format_score(scores.get('inclusion_score', 0))
-        current_fit = format_score(scores.get('current_fit', 0))
-        recommended_fit = format_score(scores.get('recommended_fit', 0))
-        outstanding = format_price(pricing.get('outstanding', 0))
-        suggested_price = format_price(pricing.get('suggested_price', 0))
-        discount = format_pct(pricing.get('discount', 0))
-        buyer_roi = format_pct(pricing.get('buyer_roi', 0))
+        risk_score = format_score(scores.get("risk_score", 0))
+        inclusion_score = format_score(scores.get("inclusion_score", 0))
+        current_fit = format_score(scores.get("current_fit", 0))
+        recommended_fit = format_score(scores.get("recommended_fit", 0))
+        outstanding = format_price(pricing.get("outstanding", 0))
+        suggested_price = format_price(pricing.get("suggested_price", 0))
+        discount = format_pct(pricing.get("discount", 0))
+        buyer_roi = format_pct(pricing.get("buyer_roi", 0))
 
         prompt = f"""
         You are a senior credit analyst explaining a portfolio reallocation insight
@@ -115,27 +118,27 @@ class Explainer:
         Keep the explanation concise (3–4 sentences).
 
         ANONYMISED COMPANY PROFILE:
-        - Sector: {company_data.get('sector', 'Unknown')}
-        - Size Band: {company_data.get('revenue_band', 'Unknown')}
-        - Region: {company_data.get('region', 'Unknown')}
+        - Sector: {company_data.get("sector", "Unknown")}
+        - Size Band: {company_data.get("revenue_band", "Unknown")}
+        - Region: {company_data.get("region", "Unknown")}
         - Risk Score: {risk_score}/100
         - Inclusion Score: {inclusion_score}/100
 
         LOAN SUMMARY:
         - Outstanding Balance: {outstanding}
-        - Remaining Term: {pricing.get('years_remaining', 0)} years
+        - Remaining Term: {pricing.get("years_remaining", 0)} years
         - Indicative Price: {suggested_price}
         ({discount} discount)
 
         CURRENT LENDER CONTEXT:
-        - Lender Profile: {current_lender.get('description', '')}
+        - Lender Profile: {current_lender.get("description", "")}
         - Relative Fit Score: {current_fit}/100
-        - Key Alignment Factors: {', '.join(scores.get('current_mismatch_reasons', ['No specific factors']))}
+        - Key Alignment Factors: {", ".join(scores.get("current_unalign_reasons", ["No specific factors"]))}
 
         ALTERNATIVE LENDER CONTEXT:
-        - Lender Profile: {recommended_lender.get('description', '')}
+        - Lender Profile: {recommended_lender.get("description", "")}
         - Relative Fit Score: {recommended_fit}/100
-        - Key Alignment Factors: {', '.join(scores.get('recommended_fit_reasons', ['No specific factors']))}
+        - Key Alignment Factors: {", ".join(scores.get("recommended_fit_reasons", ["No specific factors"]))}
 
         ESTIMATED BUYER METRIC:
         - Annualised, Risk-Adjusted ROI: {buyer_roi}
@@ -147,8 +150,7 @@ class Explainer:
         """
         try:
             response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt
+                model=self.model, contents=prompt
             )
             return response.text
         except Exception as e:
@@ -163,12 +165,12 @@ class Explainer:
         current_lender: Dict,
         recommended_lender: Dict,
         scores: Dict,
-        pricing: Dict
+        pricing: Dict,
     ) -> str:
         """Generate explanation using templates (fallback when no API key)."""
 
-        sector = company_data.get('sector', 'Unknown')
-        region = company_data.get('region', 'Unknown')
+        sector = company_data.get("sector", "Unknown")
+        region = company_data.get("region", "Unknown")
 
         # Handle both numeric and string values (from anonymization)
         def to_num(val, default=0):
@@ -189,21 +191,21 @@ class Explainer:
                 return val
             return f"{val:.1f}" if val else "0"
 
-        current_fit_num = to_num(scores.get('current_fit', 0))
-        recommended_fit_num = to_num(scores.get('recommended_fit', 0))
+        current_fit_num = to_num(scores.get("current_fit", 0))
+        recommended_fit_num = to_num(scores.get("recommended_fit", 0))
         fit_improvement = recommended_fit_num - current_fit_num
 
-        current_fit_display = format_val(scores.get('current_fit', 0))
-        discount_display = format_pct(pricing.get('discount', 0))
-        buyer_roi_display = format_pct(pricing.get('buyer_roi', 0))
+        current_fit_display = format_val(scores.get("current_fit", 0))
+        discount_display = format_pct(pricing.get("discount", 0))
+        buyer_roi_display = format_pct(pricing.get("buyer_roi", 0))
 
-        current_name = current_lender.get('name', 'current lender')
-        recommended_name = recommended_lender.get('name', 'recommended lender')
+        current_name = current_lender.get("name", "current lender")
+        recommended_name = recommended_lender.get("name", "recommended lender")
 
         # Build explanation based on key factors
         explanation_parts = []
 
-        # Current mismatch reason
+        # Current unalign reason
         if current_fit_num < 40:
             explanation_parts.append(
                 f"This {sector} company in {region} has a poor fit score of {current_fit_display}/100 "
@@ -221,18 +223,18 @@ class Explainer:
             )
 
         # Why recommended is better
-        inclusion_score_num = to_num(scores.get('inclusion_score', 0))
-        if recommended_lender.get('inclusion_mandate') and inclusion_score_num > 60:
+        inclusion_score_num = to_num(scores.get("inclusion_score", 0))
+        if recommended_lender.get("inclusion_mandate") and inclusion_score_num > 60:
             explanation_parts.append(
                 f"{recommended_name} has an explicit inclusion mandate that aligns with this company's "
                 f"profile in an underserved region/sector."
             )
-        elif sector in (recommended_lender.get('preferred_sectors') or []):
+        elif sector in (recommended_lender.get("preferred_sectors") or []):
             explanation_parts.append(
                 f"{recommended_name} specializes in {sector}, bringing deep sector expertise "
                 f"that would benefit this company."
             )
-        elif region in (recommended_lender.get('preferred_regions') or []):
+        elif region in (recommended_lender.get("preferred_regions") or []):
             explanation_parts.append(
                 f"{recommended_name} has a regional focus that includes {region}, "
                 f"making them better positioned to serve this company."
@@ -246,7 +248,7 @@ class Explainer:
         # Financial benefit
         explanation_parts.append(
             f"At a {discount_display}% discount, the buyer achieves {buyer_roi_display}% annualized ROI "
-            f"while the seller exits a mismatched position to optimize their portfolio."
+            f"while the seller exits a unaligned position to optimize their portfolio."
         )
 
         return " ".join(explanation_parts)
@@ -254,14 +256,18 @@ class Explainer:
     def generate_market_insight(self, market_stats: Dict) -> str:
         """Generate a market-level insight summary."""
 
-        mismatched_pct = market_stats.get('mismatched_companies', {}).get('percentage', 0)
-        strong_candidates = market_stats.get('reallocation_candidates', {}).get('strong', 0)
-        avg_improvement = market_stats.get('fit_scores', {}).get('average_improvement', 0)
-        total_value = market_stats.get('reallocation_value', {}).get('formatted', '£0')
+        unaligned_pct = market_stats.get("unaligned_companies", {}).get("percentage", 0)
+        strong_candidates = market_stats.get("reallocation_candidates", {}).get(
+            "strong", 0
+        )
+        avg_improvement = market_stats.get("fit_scores", {}).get(
+            "average_improvement", 0
+        )
+        total_value = market_stats.get("reallocation_value", {}).get("formatted", "£0")
 
         if self.client:
             prompt = f"""Generate a 2-3 sentence market insight summary based on this data:
-- {mismatched_pct}% of loans are mismatched with current lenders
+- {unaligned_pct}% of loans are unaligned with current lenders
 - {strong_candidates} are strong reallocation candidates
 - Average fit improvement from reallocation: {avg_improvement} points
 - Total value available for reallocation: {total_value}
@@ -270,8 +276,7 @@ Focus on the opportunity and benefit for the SME lending market."""
 
             try:
                 response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=prompt
+                    model=self.model, contents=prompt
                 )
                 return response.text
             except Exception:
@@ -279,7 +284,7 @@ Focus on the opportunity and benefit for the SME lending market."""
 
         # Fallback template
         return (
-            f"Analysis reveals {mismatched_pct}% of the portfolio could benefit from reallocation, "
+            f"Analysis reveals {unaligned_pct}% of the portfolio could benefit from reallocation, "
             f"with {strong_candidates} strong candidates identified. "
             f"If recommended reallocations were executed, average portfolio fit would improve by "
             f"{avg_improvement} points, potentially improving outcomes for {total_value} in lending exposure."
@@ -288,12 +293,12 @@ Focus on the opportunity and benefit for the SME lending market."""
     def generate_inclusion_insight(self, inclusion_stats: Dict) -> str:
         """Generate an inclusion-focused insight."""
 
-        high_potential = inclusion_stats.get('high_potential_underserved', {})
-        count = high_potential.get('count', 0)
-        pct = high_potential.get('percentage', 0)
+        high_potential = inclusion_stats.get("high_potential_underserved", {})
+        count = high_potential.get("count", 0)
+        pct = high_potential.get("percentage", 0)
 
-        regional_stats = inclusion_stats.get('underserved_regions', {})
-        regional_pct = regional_stats.get('percentage', 0)
+        regional_stats = inclusion_stats.get("underserved_regions", {})
+        regional_pct = regional_stats.get("percentage", 0)
 
         if self.client:
             prompt = f"""Generate a 2-sentence insight about financial inclusion opportunities:
@@ -305,8 +310,7 @@ Emphasize the virtuous cycle: more appropriate loans -> more business success ->
 
             try:
                 response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=prompt
+                    model=self.model, contents=prompt
                 )
                 return response.text
             except Exception:
@@ -334,13 +338,13 @@ Emphasize the virtuous cycle: more appropriate loans -> more business success ->
         Returns:
             Inclusion-focused narrative about the swap's impact
         """
-        loan_a_sector = swap_data.get('loan_a_sector', 'Unknown')
-        loan_a_region = swap_data.get('loan_a_region', 'Unknown')
-        loan_a_inclusion = swap_data.get('loan_a_inclusion_score', 0)
-        loan_b_sector = swap_data.get('loan_b_sector', 'Unknown')
-        loan_b_region = swap_data.get('loan_b_region', 'Unknown')
-        loan_b_inclusion = swap_data.get('loan_b_inclusion_score', 0)
-        fit_improvement = swap_data.get('total_fit_improvement', 0)
+        loan_a_sector = swap_data.get("loan_a_sector", "Unknown")
+        loan_a_region = swap_data.get("loan_a_region", "Unknown")
+        loan_a_inclusion = swap_data.get("loan_a_inclusion_score", 0)
+        loan_b_sector = swap_data.get("loan_b_sector", "Unknown")
+        loan_b_region = swap_data.get("loan_b_region", "Unknown")
+        loan_b_inclusion = swap_data.get("loan_b_inclusion_score", 0)
+        fit_improvement = swap_data.get("total_fit_improvement", 0)
 
         if self.client:
             prompt = f"""Generate a 2-3 sentence inclusion-focused story about this loan swap.
@@ -352,7 +356,7 @@ SWAP DETAILS:
 - Combined Fit Improvement: +{fit_improvement} points
 
 The story should emphasize:
-1. How mismatched loans can disadvantage SMEs in underserved regions/sectors
+1. How unaligned loans can disadvantage SMEs in underserved regions/sectors
 2. How this swap helps both companies access lenders who understand their needs
 3. The virtuous cycle: appropriate lending → business success → more capital → more lending
 
@@ -360,8 +364,7 @@ Keep the tone professional but impactful. Avoid hyperbole."""
 
             try:
                 response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=prompt
+                    model=self.model, contents=prompt
                 )
                 return response.text
             except Exception:
@@ -385,7 +388,13 @@ Keep the tone professional but impactful. Avoid hyperbole."""
         )
 
 
-def prepare_explanation_data(company, current_lender_profile, recommended_lender_profile, pricing_details, anonymize: bool = True) -> tuple:
+def prepare_explanation_data(
+    company,
+    current_lender_profile,
+    recommended_lender_profile,
+    pricing_details,
+    anonymize: bool = True,
+) -> tuple:
     """
     Helper function to prepare data for the explainer from DataFrame row and profiles.
 
@@ -400,26 +409,32 @@ def prepare_explanation_data(company, current_lender_profile, recommended_lender
         Tuple of (company_data, current_lender, recommended_lender, scores, pricing)
     """
     from utils.anonymizer import (
-        anonymize_lender, round_score, band_percentage,
-        format_amount_range, group_region, band_turnover
+        anonymize_lender,
+        round_score,
+        band_percentage,
+        format_amount_range,
+        group_region,
+        band_turnover,
     )
 
     if anonymize:
         # Anonymize region and band turnover
-        region_display = group_region(company.get('Region', 'Unknown'))
-        revenue_band = band_turnover(company.get('Turnover', 0))
+        region_display = group_region(company.get("Region", "Unknown"))
+        revenue_band = band_turnover(company.get("Turnover", 0))
 
         # Round scores
-        risk_display = round_score(company.get('Risk_Score', 0))
-        inclusion_display = round_score(company.get('Inclusion_Score', 0))
-        current_fit_display = round_score(company.get('Current_Lender_Fit', 0))
-        recommended_fit_display = round_score(company.get('Best_Match_Fit', 0))
+        risk_display = round_score(company.get("Risk_Score", 0))
+        inclusion_display = round_score(company.get("Inclusion_Score", 0))
+        current_fit_display = round_score(company.get("Current_Lender_Fit", 0))
+        recommended_fit_display = round_score(company.get("Best_Match_Fit", 0))
 
         # Get pricing values and band them
-        outstanding = pricing_details.get('loan_details', {}).get('outstanding_balance', 0)
-        suggested_price = pricing_details.get('pricing', {}).get('suggested_price', 0)
-        discount = pricing_details.get('pricing', {}).get('discount_from_face', 0)
-        buyer_roi = pricing_details.get('buyer_metrics', {}).get('annualized_roi', 0)
+        outstanding = pricing_details.get("loan_details", {}).get(
+            "outstanding_balance", 0
+        )
+        suggested_price = pricing_details.get("pricing", {}).get("suggested_price", 0)
+        discount = pricing_details.get("pricing", {}).get("discount_from_face", 0)
+        buyer_roi = pricing_details.get("buyer_metrics", {}).get("annualized_roi", 0)
 
         outstanding_display = format_amount_range(outstanding)
         price_display = format_amount_range(suggested_price)
@@ -427,46 +442,58 @@ def prepare_explanation_data(company, current_lender_profile, recommended_lender
         roi_display = band_percentage(buyer_roi)
 
         # Anonymize recommended lender
-        recommended_name = recommended_lender_profile.get('name', 'Unknown')
+        recommended_name = recommended_lender_profile.get("name", "Unknown")
         anon_recommended = recommended_lender_profile.copy()
-        anon_recommended['name'] = anonymize_lender(recommended_name, is_current=False)
-        anon_recommended['description'] = f"Alternative lender with {recommended_lender_profile.get('risk_tolerance', 'medium')} risk tolerance"
+        anon_recommended["name"] = anonymize_lender(recommended_name, is_current=False)
+        anon_recommended["description"] = (
+            f"Alternative lender with {recommended_lender_profile.get('risk_tolerance', 'medium')} risk tolerance"
+        )
     else:
-        region_display = company.get('Region', 'Unknown')
-        revenue_band = company.get('Revenue_Band', 'Unknown')
-        risk_display = company.get('Risk_Score', 0)
-        inclusion_display = company.get('Inclusion_Score', 0)
-        current_fit_display = company.get('Current_Lender_Fit', 0)
-        recommended_fit_display = company.get('Best_Match_Fit', 0)
+        region_display = company.get("Region", "Unknown")
+        revenue_band = company.get("Revenue_Band", "Unknown")
+        risk_display = company.get("Risk_Score", 0)
+        inclusion_display = company.get("Inclusion_Score", 0)
+        current_fit_display = company.get("Current_Lender_Fit", 0)
+        recommended_fit_display = company.get("Best_Match_Fit", 0)
 
-        outstanding_display = pricing_details.get('loan_details', {}).get('outstanding_balance', 0)
-        price_display = pricing_details.get('pricing', {}).get('suggested_price', 0)
-        discount_display = pricing_details.get('pricing', {}).get('discount_from_face', 0)
-        roi_display = pricing_details.get('buyer_metrics', {}).get('annualized_roi', 0)
+        outstanding_display = pricing_details.get("loan_details", {}).get(
+            "outstanding_balance", 0
+        )
+        price_display = pricing_details.get("pricing", {}).get("suggested_price", 0)
+        discount_display = pricing_details.get("pricing", {}).get(
+            "discount_from_face", 0
+        )
+        roi_display = pricing_details.get("buyer_metrics", {}).get("annualized_roi", 0)
         anon_recommended = recommended_lender_profile
 
     company_data = {
-        'sector': company.get('Sector', 'Unknown'),
-        'region': region_display,
-        'revenue_band': revenue_band,
-        'turnover': company.get('Turnover', 0)
+        "sector": company.get("Sector", "Unknown"),
+        "region": region_display,
+        "revenue_band": revenue_band,
+        "turnover": company.get("Turnover", 0),
     }
 
     scores = {
-        'risk_score': risk_display,
-        'inclusion_score': inclusion_display,
-        'current_fit': current_fit_display,
-        'recommended_fit': recommended_fit_display,
-        'current_mismatch_reasons': company.get('Current_Fit_Reasons', {}).get('negative', []),
-        'recommended_fit_reasons': company.get('Best_Match_Reasons', {}).get('positive', [])
+        "risk_score": risk_display,
+        "inclusion_score": inclusion_display,
+        "current_fit": current_fit_display,
+        "recommended_fit": recommended_fit_display,
+        "current_unalign_reasons": company.get("Current_Fit_Reasons", {}).get(
+            "negative", []
+        ),
+        "recommended_fit_reasons": company.get("Best_Match_Reasons", {}).get(
+            "positive", []
+        ),
     }
 
     pricing = {
-        'outstanding': outstanding_display,
-        'years_remaining': pricing_details.get('loan_details', {}).get('years_remaining', 0),
-        'suggested_price': price_display,
-        'discount': discount_display,
-        'buyer_roi': roi_display
+        "outstanding": outstanding_display,
+        "years_remaining": pricing_details.get("loan_details", {}).get(
+            "years_remaining", 0
+        ),
+        "suggested_price": price_display,
+        "discount": discount_display,
+        "buyer_roi": roi_display,
     }
 
     # Current lender stays visible
@@ -481,42 +508,42 @@ if __name__ == "__main__":
 
     # Mock data for testing
     company_data = {
-        'sector': 'Advanced_Manufacturing',
-        'region': 'North West',
-        'revenue_band': '£10m-£25m'
+        "sector": "Advanced_Manufacturing",
+        "region": "North West",
+        "revenue_band": "£10m-£25m",
     }
 
     current_lender = {
-        'name': 'Alpha Bank',
-        'description': 'Conservative traditional bank',
-        'preferred_sectors': ['Financial', 'Professional_Business'],
-        'preferred_regions': ['London', 'South East'],
-        'inclusion_mandate': False
+        "name": "Alpha Bank",
+        "description": "Conservative traditional bank",
+        "preferred_sectors": ["Financial", "Professional_Business"],
+        "preferred_regions": ["London", "South East"],
+        "inclusion_mandate": False,
     }
 
     recommended_lender = {
-        'name': 'Regional Development Fund',
-        'description': 'Regional inclusion mandate',
-        'preferred_sectors': None,
-        'preferred_regions': ['North West', 'Scotland'],
-        'inclusion_mandate': True
+        "name": "Regional Development Fund",
+        "description": "Regional inclusion mandate",
+        "preferred_sectors": None,
+        "preferred_regions": ["North West", "Scotland"],
+        "inclusion_mandate": True,
     }
 
     scores = {
-        'risk_score': 72,
-        'inclusion_score': 68,
-        'current_fit': 38,
-        'recommended_fit': 82,
-        'current_mismatch_reasons': ['Wrong sector', 'Wrong region'],
-        'recommended_fit_reasons': ['Regional match', 'Inclusion alignment']
+        "risk_score": 72,
+        "inclusion_score": 68,
+        "current_fit": 38,
+        "recommended_fit": 82,
+        "current_unalign_reasons": ["Wrong sector", "Wrong region"],
+        "recommended_fit_reasons": ["Regional match", "Inclusion alignment"],
     }
 
     pricing = {
-        'outstanding': 1_500_000,
-        'years_remaining': 3,
-        'suggested_price': 1_320_000,
-        'discount': 12.0,
-        'buyer_roi': 14.2
+        "outstanding": 1_500_000,
+        "years_remaining": 3,
+        "suggested_price": 1_320_000,
+        "discount": 12.0,
+        "buyer_roi": 14.2,
     }
 
     explanation = explainer.generate_explanation(
